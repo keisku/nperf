@@ -190,13 +190,15 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 
 func (*parser) parseIpAddr(packet *Packet, layer gopacket.DecodingLayer) error {
 	var rawSrcIp, rawDstIp []byte
-	if ipv4, ok := layer.(*layers.IPv4); ok {
-		rawSrcIp = ipv4.SrcIP
-		rawDstIp = ipv4.DstIP
-	}
-	if ipv6, ok := layer.(*layers.IPv6); ok {
-		rawSrcIp = ipv6.SrcIP
-		rawDstIp = ipv6.DstIP
+	switch l := layer.(type) {
+	case *layers.IPv4:
+		rawSrcIp = l.SrcIP
+		rawDstIp = l.DstIP
+	case *layers.IPv6:
+		rawSrcIp = l.SrcIP
+		rawDstIp = l.DstIP
+	default:
+		return fmt.Errorf("unexpected layer type %T", layer)
 	}
 	srcIp, ok := netip.AddrFromSlice(rawSrcIp)
 	if !ok {
