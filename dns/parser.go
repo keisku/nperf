@@ -52,6 +52,8 @@ var (
 	}
 )
 
+// The parser struct contains the necessary components to parse a DNS packet.
+// This is the main structure that is used to handle and parse DNS packets.
 type parser struct {
 	decoder           *gopacket.DecodingLayerParser
 	layers            []gopacket.LayerType
@@ -147,6 +149,8 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 	return nil
 }
 
+// parseIpAddr parses the IP address from the layer.
+// This is used to extract the IP address from the layer for further processing.
 func (*parser) parseIpAddr(packet *Packet, layer gopacket.DecodingLayer) error {
 	var rawSrcIp, rawDstIp []byte
 	switch l := layer.(type) {
@@ -182,6 +186,8 @@ func (p *parser) wantQueryType(checktype layers.DNSType) bool {
 	return ok
 }
 
+// parseAnswer parses the answer from the DNS layer.
+// This is used to extract the answer from the DNS layer for further processing.
 func (p *parser) parseAnswer(dns *layers.DNS, packet *Packet) error {
 	// Only consider singleton, A-record questions
 	if len(dns.Questions) != 1 {
