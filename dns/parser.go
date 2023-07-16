@@ -166,7 +166,7 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 			}
 		case layers.LayerTypeIPv6:
 			if err := p.parseIpAddr(packet, p.ipv6Payload); err != nil {
-				slog.Warn("failed to parse IPv4 addresses", "error", err)
+				slog.Warn("failed to parse IPv6 addresses", "error", err)
 			}
 		case layers.LayerTypeUDP:
 			if packet.typ == packetTypeQuery {
