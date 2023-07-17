@@ -10,17 +10,17 @@ import (
 	"golang.org/x/exp/slog"
 )
 
-type Snooper struct {
+type Monitor struct {
 	sourceTPacket *afpacket.TPacket
 	parser        *parser
 }
 
-func NewSnooper(config Config) (*Snooper, error) {
+func NewMonitor(config Config) (*Monitor, error) {
 	tpacket, err := newTPacket()
 	if err != nil {
 		return nil, fmt.Errorf("create raw socket: %s", err)
 	}
-	return &Snooper{
+	return &Monitor{
 		sourceTPacket: tpacket,
 		parser:        newParser(config.QueryTypes),
 	}, nil
@@ -41,21 +41,21 @@ func newTPacket() (*afpacket.TPacket, error) {
 	return tpacket, nil
 }
 
-// Run starts the snooper until the context is canceled.
-func (s *Snooper) Run(ctx context.Context) {
-	go s.pollPackets(ctx)
+// Run starts the Monitor until the context is canceled.
+func (m *Monitor) Run(ctx context.Context) {
+	go m.pollPackets(ctx)
 	<-ctx.Done()
-	s.sourceTPacket.Close()
+	m.sourceTPacket.Close()
 }
 
-func (s *Snooper) pollPackets(ctx context.Context) {
+func (m *Monitor) pollPackets(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Millisecond)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			data, captureInfo, err := s.sourceTPacket.ZeroCopyReadPacketData()
+			data, captureInfo, err := m.sourceTPacket.ZeroCopyReadPacketData()
 
 			// This is the error code returned when an operation on a non-blocking socket cannot be completed immediately.
 			// It tells the program that the operation would have caused the process to be suspended,
@@ -72,7 +72,7 @@ func (s *Snooper) pollPackets(ctx context.Context) {
 				continue
 			}
 
-			if err := s.processPacket(data, captureInfo.Timestamp); err != nil {
+			if err := m.processPacket(data, captureInfo.Timestamp); err != nil {
 				slog.Debug(fmt.Sprintf("retrieve DNS information form a received packet: %s", err))
 			}
 		}
@@ -80,7 +80,7 @@ func (s *Snooper) pollPackets(ctx context.Context) {
 }
 
 // processPacket retrieves DNS information from the received packet data.
-func (s *Snooper) processPacket(data []byte, t time.Time) error {
+func (s *Monitor) processPacket(data []byte, t time.Time) error {
 	var packet Packet
 	if err := s.parser.parse(data, &packet); err != nil {
 		return fmt.Errorf("parse a DNS packet: %s", err)

@@ -92,7 +92,7 @@ func newParser(queryTypes []string) *parser {
 			slog.Warn(fmt.Sprintf("unknown DNS query type %q", qt))
 		}
 	}
-	slog.Info(fmt.Sprintf("DNS snooper will record queries of type %q", qtypes.String()))
+	slog.Info(fmt.Sprintf("DNS Monitor will record queries of type %q", qtypes.String()))
 	return &parser{
 		decoder:           gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, decoders...),
 		ipv4Payload:       ipv4Payload,

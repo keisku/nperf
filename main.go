@@ -38,11 +38,11 @@ func (o *Options) Validate() error {
 }
 
 func (o *Options) Run(ctx context.Context) error {
-	dnsSnooper, err := dns.NewSnooper(dns.Config{})
+	dnsMonitor, err := dns.NewMonitor(dns.Config{})
 	if err != nil {
-		return fmt.Errorf("failed to create DNS snooper: %s", err)
+		return fmt.Errorf("failed to create DNS Monitor: %s", err)
 	}
-	dnsSnooper.Run(ctx)
+	dnsMonitor.Run(ctx)
 	<-ctx.Done()
 	slog.Info("received signal, exiting program...")
 	return nil
