@@ -13,7 +13,6 @@ import (
 type Snooper struct {
 	sourceTPacket *afpacket.TPacket
 	parser        *parser
-	stateKeeper   *stateKeeper
 }
 
 func NewSnooper(config Config) (*Snooper, error) {
@@ -24,7 +23,6 @@ func NewSnooper(config Config) (*Snooper, error) {
 	return &Snooper{
 		sourceTPacket: tpacket,
 		parser:        newParser(config.QueryTypes),
-		stateKeeper:   &stateKeeper{},
 	}, nil
 }
 
@@ -87,6 +85,5 @@ func (s *Snooper) processPacket(data []byte, t time.Time) error {
 	if err := s.parser.parse(data, &packet); err != nil {
 		return fmt.Errorf("parse a DNS packet: %s", err)
 	}
-	s.stateKeeper.processPacket(packet, t)
 	return nil
 }
