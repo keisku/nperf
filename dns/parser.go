@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 )
 
@@ -117,16 +120,27 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 		return errSkippedPayload
 	}
 	if err := p.parseAnswer(p.dnsPayload, packet); err != nil {
+		if err != errSkippedPayload {
+			parseDNSLayerErr.Add(context.Background(), 1, metric.WithAttributes(attribute.String("error", err.Error())))
+		}
 		return fmt.Errorf("parsing DNS answer: %s", err)
 	}
 	for _, layer := range p.layers {
 		switch layer {
 		case layers.LayerTypeIPv4:
 			if err := p.parseIpAddr(packet, p.ipv4Payload); err != nil {
+				parseIPLayerErr.Add(context.Background(), 1, metric.WithAttributes(
+					attribute.String("error", err.Error()),
+					attribute.Int("ip_version", 4),
+				))
 				slog.Warn("failed to parse IPv4 addresses", "error", err)
 			}
 		case layers.LayerTypeIPv6:
 			if err := p.parseIpAddr(packet, p.ipv6Payload); err != nil {
+				parseIPLayerErr.Add(context.Background(), 1, metric.WithAttributes(
+					attribute.String("error", err.Error()),
+					attribute.Int("ip_version", 6),
+				))
 				slog.Warn("failed to parse IPv6 addresses", "error", err)
 			}
 		case layers.LayerTypeUDP:

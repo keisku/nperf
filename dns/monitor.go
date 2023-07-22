@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/gopacket/afpacket"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 )
 
@@ -53,6 +55,7 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("stop polling packets")
 			return
 		case <-ticker.C:
 			data, captureInfo, err := m.sourceTPacket.ZeroCopyReadPacketData()
@@ -61,13 +64,16 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 			// It tells the program that the operation would have caused the process to be suspended,
 			// and the process should try the operation again later.
 			if err == syscall.EAGAIN {
+				pollPacketEAGAIN.Add(ctx, 1)
 				continue
 			}
 			if err == afpacket.ErrTimeout {
+				pollPacketTimeout.Add(ctx, 1)
 				slog.Debug("timeout while reading a packet")
 				continue
 			}
 			if err != nil {
+				pollPacketErr.Add(ctx, 1, metric.WithAttributes(attribute.String("error", err.Error())))
 				slog.Warn("read a packet", err)
 				continue
 			}
@@ -80,9 +86,9 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 }
 
 // processPacket retrieves DNS information from the received packet data.
-func (s *Monitor) processPacket(data []byte, t time.Time) error {
+func (m *Monitor) processPacket(data []byte, t time.Time) error {
 	var packet Packet
-	if err := s.parser.parse(data, &packet); err != nil {
+	if err := m.parser.parse(data, &packet); err != nil {
 		return fmt.Errorf("parse a DNS packet: %s", err)
 	}
 	return nil
