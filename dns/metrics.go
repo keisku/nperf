@@ -31,9 +31,6 @@ func ConfigureMetricMeter(m metric.Meter) error {
 	meter = m
 
 	var err error
-	if err != nil {
-		return err
-	}
 	pollPacketEAGAIN, err = meter.Int64Counter(metricName(metricPrefixPollPacket, "eagain"))
 	if err != nil {
 		return err
