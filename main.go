@@ -42,7 +42,7 @@ func (o *Options) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create DNS Monitor: %s", err)
 	}
-	dnsMonitor.Run(ctx)
+	go dnsMonitor.Run(ctx)
 	<-ctx.Done()
 	slog.Info("received signal, exiting program...")
 	return nil

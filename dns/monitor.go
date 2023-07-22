@@ -43,7 +43,7 @@ func newTPacket() (*afpacket.TPacket, error) {
 
 // Run starts the Monitor until the context is canceled.
 func (m *Monitor) Run(ctx context.Context) {
-	go m.pollPackets(ctx)
+	m.pollPackets(ctx)
 	<-ctx.Done()
 	m.sourceTPacket.Close()
 }
