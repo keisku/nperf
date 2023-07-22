@@ -72,12 +72,14 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 	defer cancel()
 
+	errlog := log.New(os.Stderr, "", log.LstdFlags)
+
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
-		log.Fatalln(err)
+		errlog.Println(err)
 	}
 
 	if err := NewCmd().ExecuteContext(ctx); err != nil {
-		log.Fatalln(err)
+		errlog.Println(err)
 	}
 }
