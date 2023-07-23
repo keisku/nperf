@@ -8,12 +8,14 @@ import (
 var (
 	meter metric.Meter = noop.Meter{}
 
-	pollPacketEAGAIN   metric.Int64Counter = noop.Int64Counter{}
-	pollPacketTimeout  metric.Int64Counter = noop.Int64Counter{}
-	pollPacketError    metric.Int64Counter = noop.Int64Counter{}
-	parseDNSLayerError metric.Int64Counter = noop.Int64Counter{}
-	parseIPLayerError  metric.Int64Counter = noop.Int64Counter{}
-	responseFailure    metric.Int64Counter = noop.Int64Counter{}
+	pollPacketEAGAIN        metric.Int64Counter   = noop.Int64Counter{}
+	pollPacketTimeout       metric.Int64Counter   = noop.Int64Counter{}
+	pollPacketError         metric.Int64Counter   = noop.Int64Counter{}
+	parseDNSLayerError      metric.Int64Counter   = noop.Int64Counter{}
+	parseIPLayerError       metric.Int64Counter   = noop.Int64Counter{}
+	responseFailure         metric.Int64Counter   = noop.Int64Counter{}
+	noCorrespondingResponse metric.Int64Counter   = noop.Int64Counter{}
+	queryLatency            metric.Int64Histogram = noop.Int64Histogram{}
 )
 
 // ConfigureMetricMeter configures the metric meter to be used by the dns package.
@@ -39,6 +41,19 @@ func ConfigureMetricMeter(m metric.Meter) error {
 	if responseFailure, err = meter.Int64Counter(
 		"nmon_dns_response_failure",
 		metric.WithDescription("A DNS response code is not successful."),
+	); err != nil {
+		return err
+	}
+	if noCorrespondingResponse, err = meter.Int64Counter(
+		"nmon_dns_no_corresponding_response",
+		metric.WithDescription("No corresponding response for a DNS query. It means that we cannot record the latency of the DNS query."),
+	); err != nil {
+		return err
+	}
+	if queryLatency, err = meter.Int64Histogram(
+		"nmon_dns_query_latency",
+		metric.WithDescription("The latency of a DNS query."),
+		metric.WithUnit("microseconds"),
 	); err != nil {
 		return err
 	}

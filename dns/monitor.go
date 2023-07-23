@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/gopacket/afpacket"
+	timeutil "github.com/keisku/nmon/util/time"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
@@ -15,6 +16,48 @@ import (
 type Monitor struct {
 	sourceTPacket *afpacket.TPacket
 	parser        *parser
+	queryStats    map[queryStatsKey]queryStatsValue
+}
+
+type queryStatsKey struct {
+	key           Key
+	transactionId uint16
+}
+
+type queryStatsValue struct {
+	packetCapturedAt uint64
+}
+
+func (m *Monitor) recordQueryStats(packet Packet) error {
+	queryStatsKey := queryStatsKey{
+		key:           packet.key,
+		transactionId: packet.transactionID,
+	}
+
+	if packet.typ == packetTypeQuery {
+		if _, ok := m.queryStats[queryStatsKey]; !ok {
+			m.queryStats[queryStatsKey] = queryStatsValue{
+				packetCapturedAt: timeutil.MicroSeconds(packet.capturedAt),
+			}
+		}
+		return nil
+	}
+
+	queryStats, ok := m.queryStats[queryStatsKey]
+	if !ok {
+		noCorrespondingResponse.Add(context.Background(), 1,
+			metric.WithAttributes(packet.Attributes()...),
+		)
+		return fmt.Errorf("no corresponding query entry for a response: %#v", packet.key)
+	}
+
+	delete(m.queryStats, queryStatsKey)
+
+	latency := timeutil.MicroSeconds(packet.capturedAt) - queryStats.packetCapturedAt
+	queryLatency.Record(context.Background(), int64(latency),
+		metric.WithAttributes(packet.Attributes()...),
+	)
+	return nil
 }
 
 func NewMonitor(config Config) (*Monitor, error) {
@@ -25,6 +68,7 @@ func NewMonitor(config Config) (*Monitor, error) {
 	return &Monitor{
 		sourceTPacket: tpacket,
 		parser:        newParser(config.QueryTypes),
+		queryStats:    make(map[queryStatsKey]queryStatsValue),
 	}, nil
 }
 
@@ -86,10 +130,15 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 }
 
 // processPacket retrieves DNS information from the received packet data.
-func (m *Monitor) processPacket(data []byte, t time.Time) error {
-	var packet Packet
+func (m *Monitor) processPacket(data []byte, packetCapturedAt time.Time) error {
+	packet := Packet{
+		capturedAt: packetCapturedAt,
+	}
 	if err := m.parser.parse(data, &packet); err != nil {
 		return fmt.Errorf("parse a DNS packet: %s", err)
+	}
+	if err := m.recordQueryStats(packet); err != nil {
+		return fmt.Errorf("record DNS statistics: %s", err)
 	}
 	return nil
 }

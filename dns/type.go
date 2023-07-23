@@ -2,9 +2,11 @@ package dns
 
 import (
 	"net/netip"
+	"time"
 
 	"github.com/google/gopacket/layers"
 	"github.com/keisku/nmon/util/intern"
+	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/exp/slog"
 )
 
@@ -15,8 +17,9 @@ type Packet struct {
 	typ          packetType
 	responseCode layers.DNSResponseCode
 	// question is the query that was sent to the DNS server.
-	question  Hostname
-	queryType layers.DNSType
+	question   Hostname
+	queryType  layers.DNSType
+	capturedAt time.Time
 }
 
 func (p *Packet) LogAttr() slog.Attr {
@@ -37,6 +40,16 @@ func (p *Packet) LogAttr() slog.Attr {
 	)
 }
 
+func (p *Packet) Attributes() []attribute.KeyValue {
+	return append([]attribute.KeyValue{
+		attribute.Int("transaction_id", int(p.transactionID)),
+		attribute.String("type", p.typ.String()),
+		attribute.String("response_code", p.responseCode.String()),
+		attribute.String("question", p.question.Get()),
+		attribute.String("query_type", p.queryType.String()),
+	}, p.key.Attributes()...)
+}
+
 // Key is an identifier for a set of DNS connections
 type Key struct {
 	serverIP   netip.Addr
@@ -44,6 +57,15 @@ type Key struct {
 	clientPort uint16
 	// Protocol will be either TCP or UDP
 	protocol uint8
+}
+
+func (k Key) Attributes() []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("server_ip", k.serverIP.String()),
+		attribute.String("client_ip", k.clientIP.String()),
+		attribute.Int("client_port", int(k.clientPort)),
+		attribute.Int("protocol", int(k.protocol)),
+	}
 }
 
 var si = intern.NewStringInterner()

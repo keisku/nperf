@@ -27,6 +27,19 @@ const (
 	packetTypeQuery
 )
 
+func (t packetType) String() string {
+	switch t {
+	case packetTypeSuccessfulResponse:
+		return "successful_response"
+	case packetTypeFailedResponse:
+		return "failed_response"
+	case packetTypeQuery:
+		return "query"
+	default:
+		return "unknown"
+	}
+}
+
 var (
 	errTruncated      = errors.New("the packet is truncated")
 	errSkippedPayload = errors.New("the packet does not contain relevant DNS response")
