@@ -73,7 +73,7 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 				continue
 			}
 			if err != nil {
-				pollPacketErr.Add(ctx, 1, metric.WithAttributes(attribute.String("error", err.Error())))
+				pollPacketError.Add(ctx, 1, metric.WithAttributes(attribute.String("error", err.Error())))
 				slog.Warn("read a packet", err)
 				continue
 			}

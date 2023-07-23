@@ -1,8 +1,6 @@
 package dns
 
 import (
-	"fmt"
-
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
 )
@@ -10,45 +8,31 @@ import (
 var (
 	meter metric.Meter = noop.Meter{}
 
-	metricPrefix = "nmon_dns_"
-	metricName   = func(prefix, name string) string {
-		return fmt.Sprintf("%s%s", prefix, name)
-	}
-
-	metricPrefixPollPacket = fmt.Sprintf("%spoll_packet_", metricPrefix)
-	pollPacketEAGAIN       metric.Int64Counter
-	pollPacketTimeout      metric.Int64Counter
-	pollPacketErr          metric.Int64Counter
-
-	metricPrefixParseDNSLayer = fmt.Sprintf("%sparse_dns_layer_", metricPrefix)
-	parseDNSLayerErr          metric.Int64Counter
-
-	metricPrefixParseIPLayer = fmt.Sprintf("%sparse_ip_layer_", metricPrefix)
-	parseIPLayerErr          metric.Int64Counter
+	pollPacketEAGAIN   metric.Int64Counter = noop.Int64Counter{}
+	pollPacketTimeout  metric.Int64Counter = noop.Int64Counter{}
+	pollPacketError    metric.Int64Counter = noop.Int64Counter{}
+	parseDNSLayerError metric.Int64Counter = noop.Int64Counter{}
+	parseIPLayerError  metric.Int64Counter = noop.Int64Counter{}
 )
 
+// ConfigureMetricMeter configures the metric meter to be used by the dns package.
 func ConfigureMetricMeter(m metric.Meter) error {
 	meter = m
 
 	var err error
-	pollPacketEAGAIN, err = meter.Int64Counter(metricName(metricPrefixPollPacket, "eagain"))
-	if err != nil {
+	if pollPacketEAGAIN, err = meter.Int64Counter("nmon_dns_poll_packet_eagain"); err != nil {
 		return err
 	}
-	pollPacketTimeout, err = meter.Int64Counter(metricName(metricPrefixPollPacket, "timeout"))
-	if err != nil {
+	if pollPacketTimeout, err = meter.Int64Counter("nmon_dns_poll_packet_timeout"); err != nil {
 		return err
 	}
-	pollPacketErr, err = meter.Int64Counter(metricName(metricPrefixPollPacket, "error"))
-	if err != nil {
+	if pollPacketError, err = meter.Int64Counter("nmon_dns_poll_packet_error"); err != nil {
 		return err
 	}
-	parseDNSLayerErr, err = meter.Int64Counter(metricName(metricPrefixParseDNSLayer, "error"))
-	if err != nil {
+	if parseDNSLayerError, err = meter.Int64Counter("nmon_dns_process_dns_layer_error"); err != nil {
 		return err
 	}
-	parseIPLayerErr, err = meter.Int64Counter(metricName(metricPrefixParseIPLayer, "error"))
-	if err != nil {
+	if parseIPLayerError, err = meter.Int64Counter("nmon_dns_process_ip_layer_error"); err != nil {
 		return err
 	}
 	return nil

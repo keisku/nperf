@@ -121,7 +121,7 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 	}
 	if err := p.parseAnswer(p.dnsPayload, packet); err != nil {
 		if err != errSkippedPayload {
-			parseDNSLayerErr.Add(context.Background(), 1, metric.WithAttributes(attribute.String("error", err.Error())))
+			parseDNSLayerError.Add(context.Background(), 1, metric.WithAttributes(attribute.String("error", err.Error())))
 		}
 		return fmt.Errorf("parsing DNS answer: %s", err)
 	}
@@ -129,7 +129,7 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 		switch layer {
 		case layers.LayerTypeIPv4:
 			if err := p.parseIpAddr(packet, p.ipv4Payload); err != nil {
-				parseIPLayerErr.Add(context.Background(), 1, metric.WithAttributes(
+				parseIPLayerError.Add(context.Background(), 1, metric.WithAttributes(
 					attribute.String("error", err.Error()),
 					attribute.Int("ip_version", 4),
 				))
@@ -137,7 +137,7 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 			}
 		case layers.LayerTypeIPv6:
 			if err := p.parseIpAddr(packet, p.ipv6Payload); err != nil {
-				parseIPLayerErr.Add(context.Background(), 1, metric.WithAttributes(
+				parseIPLayerError.Add(context.Background(), 1, metric.WithAttributes(
 					attribute.String("error", err.Error()),
 					attribute.Int("ip_version", 6),
 				))
