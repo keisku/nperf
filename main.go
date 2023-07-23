@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/keisku/nmon/dns"
@@ -15,8 +16,10 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
 	"golang.org/x/exp/slog"
@@ -48,13 +51,36 @@ func (o *Options) Validate() error {
 	return nil
 }
 
+type encoder struct{}
+
+func (e encoder) Encode(v any) error {
+	resourceMetrics, ok := v.(*metricdata.ResourceMetrics)
+	if !ok {
+		slog.Warn("failed to cast to metricdata.ResourceMetrics", slog.Any("value", v))
+		return nil
+	}
+	for _, scopeMetric := range resourceMetrics.ScopeMetrics {
+		for _, metric := range scopeMetric.Metrics {
+			// TODO: Print metric in a better way.
+			// See: https://github.com/open-telemetry/opentelemetry-go/blob/cbc5890d9cba29c57a0c39dd27ed204e29d5370a/exporters/prometheus/exporter.go#L140
+			slog.Info("metric", slog.Any("metric", metric))
+		}
+	}
+	return nil
+}
+
 func initMeterProvider() (func(context.Context) error, error) {
-	raeder, err := otelprom.New()
+	stdoutExporter, err := stdoutmetric.New(stdoutmetric.WithEncoder(encoder{}))
+	if err != nil {
+		return nil, fmt.Errorf("create stdout exporter: %s", err)
+	}
+	reader, err := otelprom.New()
 	if err != nil {
 		return nil, fmt.Errorf("create prometheus reader: %s", err)
 	}
 	meterProvider := metric.NewMeterProvider(
-		metric.WithReader(raeder),
+		metric.WithReader(reader),
+		metric.WithReader(metric.NewPeriodicReader(stdoutExporter, metric.WithInterval(time.Second))),
 		metric.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
 			semconv.ServiceNameKey.String("nmon"),
