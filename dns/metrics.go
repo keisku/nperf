@@ -13,6 +13,7 @@ var (
 	pollPacketError    metric.Int64Counter = noop.Int64Counter{}
 	parseDNSLayerError metric.Int64Counter = noop.Int64Counter{}
 	parseIPLayerError  metric.Int64Counter = noop.Int64Counter{}
+	responseFailure    metric.Int64Counter = noop.Int64Counter{}
 )
 
 // ConfigureMetricMeter configures the metric meter to be used by the dns package.
@@ -33,6 +34,12 @@ func ConfigureMetricMeter(m metric.Meter) error {
 		return err
 	}
 	if parseIPLayerError, err = meter.Int64Counter("nmon_dns_process_ip_layer_error"); err != nil {
+		return err
+	}
+	if responseFailure, err = meter.Int64Counter(
+		"nmon_dns_response_failure",
+		metric.WithDescription("A DNS response code is not successful."),
+	); err != nil {
 		return err
 	}
 	return nil

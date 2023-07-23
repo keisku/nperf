@@ -219,6 +219,7 @@ func (p *parser) parseAnswer(dns *layers.DNS, packet *Packet) error {
 	}
 	packet.responseCode = dns.ResponseCode
 	if dns.ResponseCode != 0 {
+		responseFailure.Add(context.Background(), 1, metric.WithAttributes(attribute.String("response_code", dns.ResponseCode.String())))
 		packet.typ = packetTypeFailedResponse
 		return nil
 	}
