@@ -23,11 +23,11 @@ type Packet struct {
 
 func (p *Packet) Attributes() []attribute.KeyValue {
 	return append([]attribute.KeyValue{
-		attribute.Int("transaction_id", int(p.transactionID)),
+		// NOTE:
+		// - Don't add the transaction ID to the attributes because it's high cardinality.
+		// - Don't add the query_type/question to the attributes because a dns answer packet doesn't have.
 		attribute.String("type", p.typ.String()),
 		attribute.String("response_code", p.responseCode.String()),
-		attribute.String("question", p.question.Get()),
-		attribute.String("query_type", p.queryType.String()),
 	}, p.key.Attributes()...)
 }
 

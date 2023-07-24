@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/gopacket/afpacket"
+	"github.com/google/gopacket/layers"
 	timeutil "github.com/keisku/nmon/util/time"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -26,6 +27,17 @@ type queryStatsKey struct {
 
 type queryStatsValue struct {
 	packetCapturedAt uint64
+	question         string
+	queryType        layers.DNSType
+}
+
+func (v queryStatsValue) Attributes() []attribute.KeyValue {
+	return []attribute.KeyValue{
+		// NOTE:
+		// - Don't add the packetCapturedAt to the attributes because it's high cardinality.
+		attribute.String("question", v.question),
+		attribute.String("query_type", v.queryType.String()),
+	}
 }
 
 func (m *Monitor) recordQueryStats(packet Packet) error {
@@ -38,6 +50,8 @@ func (m *Monitor) recordQueryStats(packet Packet) error {
 		if _, ok := m.queryStats[queryStatsKey]; !ok {
 			m.queryStats[queryStatsKey] = queryStatsValue{
 				packetCapturedAt: timeutil.MicroSeconds(packet.capturedAt),
+				question:         packet.question.Get(),
+				queryType:        packet.queryType,
 			}
 		}
 		return nil
@@ -46,7 +60,7 @@ func (m *Monitor) recordQueryStats(packet Packet) error {
 	queryStats, ok := m.queryStats[queryStatsKey]
 	if !ok {
 		noCorrespondingResponse.Add(context.Background(), 1,
-			metric.WithAttributes(packet.Attributes()...),
+			metric.WithAttributes(append(queryStats.Attributes(), packet.Attributes()...)...),
 		)
 		return fmt.Errorf("no corresponding query entry for a response: %#v", packet.key)
 	}
@@ -55,7 +69,7 @@ func (m *Monitor) recordQueryStats(packet Packet) error {
 
 	latency := timeutil.MicroSeconds(packet.capturedAt) - queryStats.packetCapturedAt
 	queryLatency.Record(context.Background(), int64(latency),
-		metric.WithAttributes(packet.Attributes()...),
+		metric.WithAttributes(append(queryStats.Attributes(), packet.Attributes()...)...),
 	)
 	return nil
 }
