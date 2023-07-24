@@ -1,2 +1,2 @@
 # nmon
-A network monitor CLI
+A network monitor CLI. Still developing....
