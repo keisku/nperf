@@ -7,7 +7,6 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/keisku/nmon/util/intern"
 	"go.opentelemetry.io/otel/attribute"
-	"golang.org/x/exp/slog"
 )
 
 type Packet struct {
@@ -20,24 +19,6 @@ type Packet struct {
 	question   Hostname
 	queryType  layers.DNSType
 	capturedAt time.Time
-}
-
-func (p *Packet) LogAttr() slog.Attr {
-	return slog.Group(
-		"dns packet",
-		slog.Any("transaction_id", p.transactionID),
-		slog.Group(
-			"key",
-			slog.String("server_ip", p.key.serverIP.String()),
-			slog.String("client_ip", p.key.clientIP.String()),
-			slog.Any("client_port", p.key.clientPort),
-			slog.Any("protocol", p.key.protocol),
-		),
-		"type", p.typ,
-		"response_code", p.responseCode.String(),
-		"question", p.question.Get(),
-		"query_type", p.queryType.String(),
-	)
 }
 
 func (p *Packet) Attributes() []attribute.KeyValue {
