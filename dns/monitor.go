@@ -57,20 +57,24 @@ func (m *Monitor) recordQueryStats(packet Packet) error {
 		return nil
 	}
 
+	metricAttrs := append(m.queryStats[queryStatsKey].Attributes(), packet.Attributes()...)
+
 	queryStats, ok := m.queryStats[queryStatsKey]
 	if !ok {
-		noCorrespondingResponse.Add(context.Background(), 1,
-			metric.WithAttributes(append(queryStats.Attributes(), packet.Attributes()...)...),
-		)
+		noCorrespondingResponse.Add(context.Background(), 1, metric.WithAttributes(metricAttrs...))
 		return fmt.Errorf("no corresponding query entry for a response: %#v", packet.key)
 	}
 
 	delete(m.queryStats, queryStatsKey)
 
 	latency := timeutil.MicroSeconds(packet.capturedAt) - queryStats.packetCapturedAt
-	queryLatency.Record(context.Background(), latency,
-		metric.WithAttributes(append(queryStats.Attributes(), packet.Attributes()...)...),
-	)
+	queryLatency.Record(context.Background(), latency, metric.WithAttributes(metricAttrs...))
+	queryLatencyGaugeCh <- datapoint[int64]{value: latency, attributes: metricAttrs}
+	select {
+	case queryLatencyGaugeCh <- datapoint[int64]{value: latency, attributes: metricAttrs}:
+	default:
+		slog.Warn("failed to send a datapoint to the channel")
+	}
 	return nil
 }
 
@@ -106,6 +110,7 @@ func (m *Monitor) Run(ctx context.Context) {
 	m.pollPackets(ctx)
 	<-ctx.Done()
 	m.sourceTPacket.Close()
+	closeAllMetricChannels()
 }
 
 func (m *Monitor) pollPackets(ctx context.Context) {
