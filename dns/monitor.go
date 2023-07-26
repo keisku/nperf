@@ -69,7 +69,6 @@ func (m *Monitor) recordQueryStats(packet Packet) error {
 
 	latency := timeutil.MicroSeconds(packet.capturedAt) - queryStats.packetCapturedAt
 	queryLatency.Record(context.Background(), latency, metric.WithAttributes(metricAttrs...))
-	queryLatencyGaugeCh <- datapoint[int64]{value: latency, attributes: metricAttrs}
 	select {
 	case queryLatencyGaugeCh <- datapoint[int64]{value: latency, attributes: metricAttrs}:
 	default:
