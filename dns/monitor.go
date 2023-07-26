@@ -26,7 +26,7 @@ type queryStatsKey struct {
 }
 
 type queryStatsValue struct {
-	packetCapturedAt uint64
+	packetCapturedAt int64
 	question         string
 	queryType        layers.DNSType
 }
@@ -68,7 +68,7 @@ func (m *Monitor) recordQueryStats(packet Packet) error {
 	delete(m.queryStats, queryStatsKey)
 
 	latency := timeutil.MicroSeconds(packet.capturedAt) - queryStats.packetCapturedAt
-	queryLatency.Record(context.Background(), int64(latency),
+	queryLatency.Record(context.Background(), latency,
 		metric.WithAttributes(append(queryStats.Attributes(), packet.Attributes()...)...),
 	)
 	return nil
