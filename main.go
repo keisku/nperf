@@ -9,12 +9,14 @@ import (
 	"os/signal"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/keisku/nmon/dns"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	otelmetric "go.opentelemetry.io/otel/metric"
@@ -51,22 +53,61 @@ func (o *Options) Validate() error {
 	return nil
 }
 
+// encoder writes metric data to stdout
 type encoder struct{}
 
-func (e encoder) Encode(v any) error {
+// TODO: This is a temporary implementation.
+// - Support other metric types.
+// - Support flitering by metric name.
+// - Support other output locations.
+// - Consider better output format.
+func (encoder) Encode(v any) error {
 	resourceMetrics, ok := v.(*metricdata.ResourceMetrics)
 	if !ok {
 		slog.Warn("failed to cast to metricdata.ResourceMetrics", slog.Any("value", v))
 		return nil
 	}
 	for _, scopeMetric := range resourceMetrics.ScopeMetrics {
-		for _, metric := range scopeMetric.Metrics {
-			// TODO: Print metric in a better way.
-			// See: https://github.com/open-telemetry/opentelemetry-go/blob/cbc5890d9cba29c57a0c39dd27ed204e29d5370a/exporters/prometheus/exporter.go#L140
-			slog.Info("metric", slog.Any("metric", metric))
+		for _, m := range scopeMetric.Metrics {
+			switch v := m.Data.(type) {
+			case metricdata.Gauge[int64]:
+				for _, dp := range v.DataPoints {
+					fmt.Printf("%s - %s | %d %s | %s | %v\n",
+						m.Name,
+						m.Description,
+						dp.Value,
+						m.Unit,
+						dp.Time,
+						getAttrs(dp.Attributes),
+					)
+				}
+			}
 		}
 	}
 	return nil
+}
+
+func getAttrs(attrs attribute.Set) map[string][]string {
+	keysMap := make(map[string][]string)
+	itr := attrs.Iter()
+	for itr.Next() {
+		kv := itr.Attribute()
+		key := strings.Map(sanitizeRune, string(kv.Key))
+		if _, ok := keysMap[key]; !ok {
+			keysMap[key] = []string{kv.Value.Emit()}
+		} else {
+			// if the sanitized key is a duplicate, append to the list of keys
+			keysMap[key] = append(keysMap[key], kv.Value.Emit())
+		}
+	}
+	return keysMap
+}
+
+func sanitizeRune(r rune) rune {
+	if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ':' || r == '_' {
+		return r
+	}
+	return '_'
 }
 
 func initMeterProvider() (func(context.Context) error, error) {
