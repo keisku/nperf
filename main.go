@@ -12,7 +12,7 @@ import (
 	"unicode"
 
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/keisku/nmon/dns"
+	"github.com/keisku/nperf/dns"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
@@ -124,7 +124,7 @@ func initMeterProvider() (func(context.Context) error, error) {
 		metric.WithReader(metric.NewPeriodicReader(stdoutExporter, metric.WithInterval(time.Second))),
 		metric.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
-			semconv.ServiceNameKey.String("nmon"),
+			semconv.ServiceNameKey.String("nperf"),
 		)),
 	)
 	otel.SetMeterProvider(meterProvider)
@@ -143,7 +143,7 @@ func (o *Options) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create DNS Monitor: %s", err)
 	}
 	if err := dns.ConfigureMetricMeter(otel.GetMeterProvider().Meter(
-		"nmon.dns",
+		"nperf.dns",
 		otelmetric.WithInstrumentationVersion(version),
 	)); err != nil {
 		return fmt.Errorf("failed to set metric meter of dns: %s", err)

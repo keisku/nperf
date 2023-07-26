@@ -37,42 +37,42 @@ func ConfigureMetricMeter(m metric.Meter) error {
 	slog.Info("metric meter will be configured, then metrics will be recorded")
 
 	var err error
-	if pollPacketEAGAIN, err = m.Int64Counter("nmon_dns_poll_packet_eagain"); err != nil {
+	if pollPacketEAGAIN, err = m.Int64Counter("nperf_dns_poll_packet_eagain"); err != nil {
 		return err
 	}
-	if pollPacketTimeout, err = m.Int64Counter("nmon_dns_poll_packet_timeout"); err != nil {
+	if pollPacketTimeout, err = m.Int64Counter("nperf_dns_poll_packet_timeout"); err != nil {
 		return err
 	}
-	if pollPacketError, err = m.Int64Counter("nmon_dns_poll_packet_error"); err != nil {
+	if pollPacketError, err = m.Int64Counter("nperf_dns_poll_packet_error"); err != nil {
 		return err
 	}
-	if parseDNSLayerError, err = m.Int64Counter("nmon_dns_process_dns_layer_error"); err != nil {
+	if parseDNSLayerError, err = m.Int64Counter("nperf_dns_process_dns_layer_error"); err != nil {
 		return err
 	}
-	if parseIPLayerError, err = m.Int64Counter("nmon_dns_process_ip_layer_error"); err != nil {
+	if parseIPLayerError, err = m.Int64Counter("nperf_dns_process_ip_layer_error"); err != nil {
 		return err
 	}
 	if responseFailure, err = m.Int64Counter(
-		"nmon_dns_response_failure",
+		"nperf_dns_response_failure",
 		metric.WithDescription("A DNS response code is not successful."),
 	); err != nil {
 		return err
 	}
 	if noCorrespondingResponse, err = m.Int64Counter(
-		"nmon_dns_no_corresponding_response",
+		"nperf_dns_no_corresponding_response",
 		metric.WithDescription("No corresponding response for a DNS query. It means that we cannot record the latency of the DNS query."),
 	); err != nil {
 		return err
 	}
 	if queryLatency, err = m.Int64Histogram(
-		"nmon_dns_query_latency",
+		"nperf_dns_query_latency",
 		metric.WithDescription("The latency of a DNS query."),
 		metric.WithUnit("microseconds"),
 	); err != nil {
 		return err
 	}
 	if queryLatencyGauge, err = m.Int64ObservableGauge(
-		"nmon_dns_query_latency",
+		"nperf_dns_query_latency",
 		metric.WithDescription("The latency of a DNS query."),
 		metric.WithUnit("microseconds"),
 	); err != nil {

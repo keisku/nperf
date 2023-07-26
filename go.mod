@@ -1,4 +1,4 @@
-module github.com/keisku/nmon
+module github.com/keisku/nperf
 
 go 1.20
 

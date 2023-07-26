@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/gopacket/afpacket"
 	"github.com/google/gopacket/layers"
-	timeutil "github.com/keisku/nmon/util/time"
+	timeutil "github.com/keisku/nperf/util/time"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/gopacket/layers"
-	"github.com/keisku/nmon/util/intern"
+	"github.com/keisku/nperf/util/intern"
 	"go.opentelemetry.io/otel/attribute"
 )
 
