@@ -60,6 +60,18 @@ func Start() (func(), error) {
 			)
 		}
 	}()
+	tcpClose, err := link.AttachTracing(link.TracingOptions{
+		Program: objs.TcpClose,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("can't attach tracing: %w", err)
+	}
+	tcpCloseExit, err := link.AttachTracing(link.TracingOptions{
+		Program: objs.TcpCloseExit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("can't attach tracing: %w", err)
+	}
 	return func() {
 		if err := objs.Close(); err != nil {
 			slog.Warn("can't close bpf objects", slog.Any("error", err))
@@ -69,6 +81,12 @@ func Start() (func(), error) {
 		}
 		if err := rd.Close(); err != nil {
 			slog.Warn("can't close ringbuf reader", slog.Any("error", err))
+		}
+		if err := tcpClose.Close(); err != nil {
+			slog.Warn("can't close tracing", slog.Any("error", err))
+		}
+		if err := tcpCloseExit.Close(); err != nil {
+			slog.Warn("can't close tracing", slog.Any("error", err))
 		}
 	}, nil
 }

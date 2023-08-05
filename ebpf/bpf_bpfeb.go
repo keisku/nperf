@@ -20,6 +20,11 @@ type bpfEvent struct {
 	Daddr uint32
 }
 
+type bpfPidFdT struct {
+	Pid uint32
+	Fd  uint32
+}
+
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -61,14 +66,20 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
-	TcpConnect *ebpf.ProgramSpec `ebpf:"tcp_connect"`
+	TcpClose     *ebpf.ProgramSpec `ebpf:"tcp_close"`
+	TcpCloseExit *ebpf.ProgramSpec `ebpf:"tcp_close_exit"`
+	TcpConnect   *ebpf.ProgramSpec `ebpf:"tcp_connect"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	Events *ebpf.MapSpec `ebpf:"events"`
+	Events               *ebpf.MapSpec `ebpf:"events"`
+	PidFdBySock          *ebpf.MapSpec `ebpf:"pid_fd_by_sock"`
+	SockByPidFd          *ebpf.MapSpec `ebpf:"sock_by_pid_fd"`
+	SockfdLookupArgs     *ebpf.MapSpec `ebpf:"sockfd_lookup_args"`
+	TcpOngoingConnectPid *ebpf.MapSpec `ebpf:"tcp_ongoing_connect_pid"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -90,12 +101,20 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	Events *ebpf.Map `ebpf:"events"`
+	Events               *ebpf.Map `ebpf:"events"`
+	PidFdBySock          *ebpf.Map `ebpf:"pid_fd_by_sock"`
+	SockByPidFd          *ebpf.Map `ebpf:"sock_by_pid_fd"`
+	SockfdLookupArgs     *ebpf.Map `ebpf:"sockfd_lookup_args"`
+	TcpOngoingConnectPid *ebpf.Map `ebpf:"tcp_ongoing_connect_pid"`
 }
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
 		m.Events,
+		m.PidFdBySock,
+		m.SockByPidFd,
+		m.SockfdLookupArgs,
+		m.TcpOngoingConnectPid,
 	)
 }
 
@@ -103,11 +122,15 @@ func (m *bpfMaps) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
-	TcpConnect *ebpf.Program `ebpf:"tcp_connect"`
+	TcpClose     *ebpf.Program `ebpf:"tcp_close"`
+	TcpCloseExit *ebpf.Program `ebpf:"tcp_close_exit"`
+	TcpConnect   *ebpf.Program `ebpf:"tcp_connect"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
+		p.TcpClose,
+		p.TcpCloseExit,
 		p.TcpConnect,
 	)
 }
