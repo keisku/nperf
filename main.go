@@ -166,10 +166,20 @@ func (o *Options) Run(ctx context.Context) error {
 	}()
 
 	<-ctx.Done()
-	slog.Info("received signal, exiting program...")
-	stopebpf()
-	if err := shutdownMeterProvider(context.Background()); err != nil {
-		return fmt.Errorf("failed to shutdown meter provider: %s", err)
+	slog.Info("exiting nperf...")
+	stopCh := make(chan struct{})
+	go func() {
+		if err := shutdownMeterProvider(context.Background()); err != nil {
+			slog.Warn("failed to shutdown meter provider", slog.Any("error", err))
+		}
+		stopebpf()
+		close(stopCh)
+	}()
+	select {
+	case <-stopCh:
+		slog.Info("nperf shutdown gracefully")
+	case <-time.After(5 * time.Second):
+		slog.Error("failed to shutdown gracefully, force exiting...")
 	}
 	return nil
 }

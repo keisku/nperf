@@ -38,7 +38,7 @@ func Start() (func(), error) {
 			record, err := rd.Read()
 			if err != nil {
 				if errors.Is(err, ringbuf.ErrClosed) {
-					slog.Info("received signal, exiting ringbuf reader...")
+					slog.Info("exiting ringbuf reader...")
 					return
 				}
 				slog.Warn("reading from reader", slog.Any("error", err))
