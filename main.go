@@ -13,6 +13,7 @@ import (
 
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/keisku/nperf/dns"
+	nperfebpf "github.com/keisku/nperf/ebpf"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
@@ -132,6 +133,10 @@ func initMeterProvider() (func(context.Context) error, error) {
 }
 
 func (o *Options) Run(ctx context.Context) error {
+	stopebpf, err := nperfebpf.Start()
+	if err != nil {
+		return fmt.Errorf("failed to start ebpf programs: %s", err)
+	}
 	shutdownMeterProvider, err := initMeterProvider()
 	if err != nil {
 		return fmt.Errorf("failed to create meter provider: %s", err)
@@ -162,6 +167,7 @@ func (o *Options) Run(ctx context.Context) error {
 
 	<-ctx.Done()
 	slog.Info("received signal, exiting program...")
+	stopebpf()
 	if err := shutdownMeterProvider(context.Background()); err != nil {
 		return fmt.Errorf("failed to shutdown meter provider: %s", err)
 	}
