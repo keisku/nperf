@@ -13,7 +13,7 @@ import (
 )
 
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -type event bpf ./c/fentry.c -- -I./c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -no-global-types -type event bpf ./c/fentry.c -- -I./c
 
 var objs bpfObjects
 
@@ -60,17 +60,21 @@ func Start() (func(), error) {
 			)
 		}
 	}()
-	tcpClose, err := link.AttachTracing(link.TracingOptions{
-		Program: objs.TcpClose,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("can't attach tracing: %w", err)
+	linkTracingOptions := []link.TracingOptions{
+		{Program: objs.TcpClose},
+		{Program: objs.TcpCloseExit},
+		{Program: objs.SockfdLookupLight},
+		{Program: objs.SockfdLookupLightExit},
+		{Program: objs.TcpRecvmsgExit},
+		{Program: objs.TcpRetransmitSkb},
+		{Program: objs.TcpRetransmitSkbExit},
 	}
-	tcpCloseExit, err := link.AttachTracing(link.TracingOptions{
-		Program: objs.TcpCloseExit,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("can't attach tracing: %w", err)
+	links := make([]link.Link, len(linkTracingOptions))
+	for i, opt := range linkTracingOptions {
+		links[i], err = link.AttachTracing(opt)
+		if err != nil {
+			return nil, fmt.Errorf("can't attach tracing: %w", err)
+		}
 	}
 	return func() {
 		if err := objs.Close(); err != nil {
@@ -82,11 +86,10 @@ func Start() (func(), error) {
 		if err := rd.Close(); err != nil {
 			slog.Warn("can't close ringbuf reader", slog.Any("error", err))
 		}
-		if err := tcpClose.Close(); err != nil {
-			slog.Warn("can't close tracing", slog.Any("error", err))
-		}
-		if err := tcpCloseExit.Close(); err != nil {
-			slog.Warn("can't close tracing", slog.Any("error", err))
+		for i := range links {
+			if err := links[i].Close(); err != nil {
+				slog.Warn("can't close tracing", slog.Any("error", err))
+			}
 		}
 	}, nil
 }

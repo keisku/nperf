@@ -1,12 +1,11 @@
-// go:build ignore
-
 #include "vmlinux.h"
 #include "map_defs.h"
 #include "conn_tuple.h"
+#include "sock.h"
+#include "sockfd.h"
+#include "tcp.h"
 
 #include <bpf/bpf_helpers.h>
-#include <bpf/bpf_core_read.h>
-#include <bpf/bpf_endian.h>
 #include <bpf/bpf_tracing.h>
 
 #define AF_INET 2
@@ -62,46 +61,6 @@ int BPF_PROG(tcp_connect, struct sock *sk)
 	return 0;
 }
 
-typedef struct
-{
-	__u32 pid;
-	__u32 fd;
-} pid_fd_t;
-
-// This map is used to to temporarily store function arguments (sockfd) for
-// sockfd_lookup_light function calls, so they can be accessed by the corresponding kretprobe.
-// * Key is the pid_tgid;
-// * Value the socket FD;
-BPF_HASH_MAP(sockfd_lookup_args, __u64, __u32, 1024)
-
-BPF_HASH_MAP(sock_by_pid_fd, pid_fd_t, struct sock *, 1024)
-
-BPF_HASH_MAP(pid_fd_by_sock, struct sock *, pid_fd_t, 1024)
-
-static __always_inline void clear_sockfd_maps(struct sock *sock)
-{
-	if (sock == NULL)
-	{
-		return;
-	}
-
-	pid_fd_t *pid_fd = bpf_map_lookup_elem(&pid_fd_by_sock, &sock);
-	if (pid_fd == NULL)
-	{
-		return;
-	}
-
-	// Copy map value to stack before re-using it (needed for Kernel 4.4)
-	pid_fd_t pid_fd_copy = {};
-	pid_fd = &pid_fd_copy;
-
-	bpf_map_delete_elem(&sock_by_pid_fd, pid_fd);
-	bpf_map_delete_elem(&pid_fd_by_sock, &sock);
-}
-
-/* Will hold the PIDs initiating TCP connections */
-BPF_HASH_MAP(tcp_ongoing_connect_pid, struct sock *, __u64, 1024)
-
 SEC("fentry/tcp_close")
 int BPF_PROG(tcp_close, struct sock *sk, long timeout)
 {
@@ -126,8 +85,6 @@ int BPF_PROG(tcp_close, struct sock *sk, long timeout)
 	return 0;
 }
 
-static __always_inline void flush_conn_close_if_full(void *ctx) {}
-
 SEC("fexit/tcp_close")
 int BPF_PROG(tcp_close_exit, struct sock *sk, long timeout)
 {
@@ -135,4 +92,125 @@ int BPF_PROG(tcp_close_exit, struct sock *sk, long timeout)
 
 	flush_conn_close_if_full(ctx);
 	return 0;
+}
+
+SEC("fentry/sockfd_lookup_light")
+int BPF_PROG(sockfd_lookup_light, int fd, int *err, int *fput_needed, struct socket *socket)
+{
+	bpf_printk("fentry/sockfd_lookup_light\n");
+	u64 pid_tgid = bpf_get_current_pid_tgid();
+
+	// Check if have already a map entry for this pid_fd_t
+	// TODO: This lookup eliminates *4* map operations for existing entries
+	// but can reduce the accuracy of programs relying on socket FDs for
+	// processes with a lot of FD churn
+	pid_fd_t key = {
+		.pid = pid_tgid >> 32,
+		.fd = fd,
+	};
+	struct sock **sock = bpf_map_lookup_elem(&sock_by_pid_fd, &key);
+	if (sock != NULL)
+	{
+		return 0;
+	}
+
+	bpf_map_update_elem(&sockfd_lookup_args, &pid_tgid, &fd, BPF_ANY);
+	return 0;
+}
+
+// * an index of pid_fd_t to a struct sock*;
+// * an index of struct sock* to pid_fd_t;
+SEC("fexit/sockfd_lookup_light")
+int BPF_PROG(sockfd_lookup_light_exit, int fd, int *err, int *fput_needed, struct socket *socket)
+{
+	bpf_printk("fexit/sockfd_lookup_light\n");
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    // Check if have already a map entry for this pid_fd_t
+    // TODO: This lookup eliminates *4* map operations for existing entries
+    // but can reduce the accuracy of programs relying on socket FDs for
+    // processes with a lot of FD churn
+    pid_fd_t key = {
+        .pid = pid_tgid >> 32,
+        .fd = fd,
+    };
+
+    struct sock **skpp = bpf_map_lookup_elem(&sock_by_pid_fd, &key);
+    if (skpp != NULL) {
+        return 0;
+    }
+
+    // For now let's only store information for TCP sockets
+    const struct proto_ops *proto_ops = BPF_CORE_READ(socket, ops);
+    if (!proto_ops) {
+        return 0;
+    }
+
+    enum sock_type sock_type = BPF_CORE_READ(socket, type);
+    int family = BPF_CORE_READ(proto_ops, family);
+    if (sock_type != SOCK_STREAM || !(family == AF_INET || family == AF_INET6)) {
+        return 0;
+    }
+
+    // Retrieve struct sock* pointer from struct socket*
+    struct sock *sock = BPF_CORE_READ(socket, sk);
+
+    pid_fd_t pid_fd = {
+        .pid = pid_tgid >> 32,
+        .fd = fd,
+    };
+
+    // These entries are cleaned up by tcp_close
+    bpf_map_update_elem(&pid_fd_by_sock, &sock, &pid_fd, BPF_ANY);
+    bpf_map_update_elem(&sock_by_pid_fd, &pid_fd, &sock, BPF_ANY);
+
+	return 0;
+}
+
+SEC("fentry/tcp_retransmit_skb")
+int BPF_PROG(tcp_retransmit_skb, struct sock *sk, struct sk_buff *skb, int segs, int err) {
+    bpf_printk("fexntry/tcp_retransmit\n");
+    u64 tid = bpf_get_current_pid_tgid();
+    tcp_retransmit_skb_args_t args = {};
+    args.retrans_out_pre = BPF_CORE_READ(tcp_sk(sk), retrans_out);
+    if (args.retrans_out_pre < 0) {
+        return 0;
+    }
+
+    bpf_map_update_elem(&pending_tcp_retransmit_skb, &tid, &args, BPF_ANY);
+
+    return 0;
+}
+
+SEC("fexit/tcp_retransmit_skb")
+int BPF_PROG(tcp_retransmit_skb_exit, struct sock *sk, struct sk_buff *skb, int segs, int err) {
+    bpf_printk("fexit/tcp_retransmit\n");
+    u64 tid = bpf_get_current_pid_tgid();
+    if (err < 0) {
+        bpf_map_delete_elem(&pending_tcp_retransmit_skb, &tid);
+        return 0;
+    }
+    tcp_retransmit_skb_args_t *args = bpf_map_lookup_elem(&pending_tcp_retransmit_skb, &tid);
+    if (args == NULL) {
+        return 0;
+    }
+    u32 retrans_out_pre = args->retrans_out_pre;
+    u32 retrans_out = BPF_CORE_READ(tcp_sk(sk), retrans_out);
+    bpf_map_delete_elem(&pending_tcp_retransmit_skb, &tid);
+
+    if (retrans_out < 0) {
+        return 0;
+    }
+
+    return handle_retransmit(sk, retrans_out-retrans_out_pre);
+}
+
+SEC("fexit/tcp_recvmsg")
+int BPF_PROG(tcp_recvmsg_exit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int copied) {
+    bpf_printk("fexit/tcp_recvmsg");
+    if (copied < 0) { // error
+        return 0;
+    }
+
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    return handle_tcp_recv(pid_tgid, sk, copied);
 }

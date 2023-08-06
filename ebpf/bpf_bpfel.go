@@ -20,11 +20,6 @@ type bpfEvent struct {
 	Daddr uint32
 }
 
-type bpfPidFdT struct {
-	Pid uint32
-	Fd  uint32
-}
-
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -66,20 +61,31 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
-	TcpClose     *ebpf.ProgramSpec `ebpf:"tcp_close"`
-	TcpCloseExit *ebpf.ProgramSpec `ebpf:"tcp_close_exit"`
-	TcpConnect   *ebpf.ProgramSpec `ebpf:"tcp_connect"`
+	SockfdLookupLight     *ebpf.ProgramSpec `ebpf:"sockfd_lookup_light"`
+	SockfdLookupLightExit *ebpf.ProgramSpec `ebpf:"sockfd_lookup_light_exit"`
+	TcpClose              *ebpf.ProgramSpec `ebpf:"tcp_close"`
+	TcpCloseExit          *ebpf.ProgramSpec `ebpf:"tcp_close_exit"`
+	TcpConnect            *ebpf.ProgramSpec `ebpf:"tcp_connect"`
+	TcpRecvmsgExit        *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_exit"`
+	TcpRetransmitSkb      *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb"`
+	TcpRetransmitSkbExit  *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb_exit"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	Events               *ebpf.MapSpec `ebpf:"events"`
-	PidFdBySock          *ebpf.MapSpec `ebpf:"pid_fd_by_sock"`
-	SockByPidFd          *ebpf.MapSpec `ebpf:"sock_by_pid_fd"`
-	SockfdLookupArgs     *ebpf.MapSpec `ebpf:"sockfd_lookup_args"`
-	TcpOngoingConnectPid *ebpf.MapSpec `ebpf:"tcp_ongoing_connect_pid"`
+	ConnCloseBatch          *ebpf.MapSpec `ebpf:"conn_close_batch"`
+	ConnCloseEvent          *ebpf.MapSpec `ebpf:"conn_close_event"`
+	ConnStats               *ebpf.MapSpec `ebpf:"conn_stats"`
+	Events                  *ebpf.MapSpec `ebpf:"events"`
+	PendingTcpRetransmitSkb *ebpf.MapSpec `ebpf:"pending_tcp_retransmit_skb"`
+	PidFdBySock             *ebpf.MapSpec `ebpf:"pid_fd_by_sock"`
+	SockByPidFd             *ebpf.MapSpec `ebpf:"sock_by_pid_fd"`
+	SockfdLookupArgs        *ebpf.MapSpec `ebpf:"sockfd_lookup_args"`
+	TcpOngoingConnectPid    *ebpf.MapSpec `ebpf:"tcp_ongoing_connect_pid"`
+	TcpRetransmits          *ebpf.MapSpec `ebpf:"tcp_retransmits"`
+	TcpStats                *ebpf.MapSpec `ebpf:"tcp_stats"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -101,20 +107,32 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	Events               *ebpf.Map `ebpf:"events"`
-	PidFdBySock          *ebpf.Map `ebpf:"pid_fd_by_sock"`
-	SockByPidFd          *ebpf.Map `ebpf:"sock_by_pid_fd"`
-	SockfdLookupArgs     *ebpf.Map `ebpf:"sockfd_lookup_args"`
-	TcpOngoingConnectPid *ebpf.Map `ebpf:"tcp_ongoing_connect_pid"`
+	ConnCloseBatch          *ebpf.Map `ebpf:"conn_close_batch"`
+	ConnCloseEvent          *ebpf.Map `ebpf:"conn_close_event"`
+	ConnStats               *ebpf.Map `ebpf:"conn_stats"`
+	Events                  *ebpf.Map `ebpf:"events"`
+	PendingTcpRetransmitSkb *ebpf.Map `ebpf:"pending_tcp_retransmit_skb"`
+	PidFdBySock             *ebpf.Map `ebpf:"pid_fd_by_sock"`
+	SockByPidFd             *ebpf.Map `ebpf:"sock_by_pid_fd"`
+	SockfdLookupArgs        *ebpf.Map `ebpf:"sockfd_lookup_args"`
+	TcpOngoingConnectPid    *ebpf.Map `ebpf:"tcp_ongoing_connect_pid"`
+	TcpRetransmits          *ebpf.Map `ebpf:"tcp_retransmits"`
+	TcpStats                *ebpf.Map `ebpf:"tcp_stats"`
 }
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
+		m.ConnCloseBatch,
+		m.ConnCloseEvent,
+		m.ConnStats,
 		m.Events,
+		m.PendingTcpRetransmitSkb,
 		m.PidFdBySock,
 		m.SockByPidFd,
 		m.SockfdLookupArgs,
 		m.TcpOngoingConnectPid,
+		m.TcpRetransmits,
+		m.TcpStats,
 	)
 }
 
@@ -122,16 +140,26 @@ func (m *bpfMaps) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
-	TcpClose     *ebpf.Program `ebpf:"tcp_close"`
-	TcpCloseExit *ebpf.Program `ebpf:"tcp_close_exit"`
-	TcpConnect   *ebpf.Program `ebpf:"tcp_connect"`
+	SockfdLookupLight     *ebpf.Program `ebpf:"sockfd_lookup_light"`
+	SockfdLookupLightExit *ebpf.Program `ebpf:"sockfd_lookup_light_exit"`
+	TcpClose              *ebpf.Program `ebpf:"tcp_close"`
+	TcpCloseExit          *ebpf.Program `ebpf:"tcp_close_exit"`
+	TcpConnect            *ebpf.Program `ebpf:"tcp_connect"`
+	TcpRecvmsgExit        *ebpf.Program `ebpf:"tcp_recvmsg_exit"`
+	TcpRetransmitSkb      *ebpf.Program `ebpf:"tcp_retransmit_skb"`
+	TcpRetransmitSkbExit  *ebpf.Program `ebpf:"tcp_retransmit_skb_exit"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
+		p.SockfdLookupLight,
+		p.SockfdLookupLightExit,
 		p.TcpClose,
 		p.TcpCloseExit,
 		p.TcpConnect,
+		p.TcpRecvmsgExit,
+		p.TcpRetransmitSkb,
+		p.TcpRetransmitSkbExit,
 	)
 }
 
