@@ -2,6 +2,7 @@
 #include "ip.h"
 #include "conn_tuple.h"
 
+#include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
 
@@ -208,9 +209,4 @@ static __always_inline int read_conn_tuple(conn_tuple_t *t, struct sock *skp, u6
 	}
 
 	return err ? 0 : 1;
-}
-
-static __always_inline void get_tcp_segment_counts(struct sock* skp, __u32* packets_in, __u32* packets_out) {
-    BPF_CORE_READ_INTO(packets_out, tcp_sk(skp), segs_out);
-    BPF_CORE_READ_INTO(packets_in, tcp_sk(skp), segs_in);
 }

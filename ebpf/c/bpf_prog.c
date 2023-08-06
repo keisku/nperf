@@ -1,5 +1,4 @@
 #include "vmlinux.h"
-#include "map_defs.h"
 #include "conn_tuple.h"
 #include "sock.h"
 #include "sockfd.h"
@@ -94,6 +93,55 @@ int BPF_PROG(tcp_close_exit, struct sock *sk, long timeout)
 	return 0;
 }
 
+SEC("fentry/tcp_retransmit_skb")
+int BPF_PROG(tcp_retransmit_skb, struct sock *sk, struct sk_buff *skb, int segs, int err) {
+    bpf_printk("fexntry/tcp_retransmit\n");
+    u64 tid = bpf_get_current_pid_tgid();
+    tcp_retransmit_skb_args_t args = {};
+    args.retrans_out_pre = BPF_CORE_READ(tcp_sk(sk), retrans_out);
+    if (args.retrans_out_pre < 0) {
+        return 0;
+    }
+
+    bpf_map_update_elem(&pending_tcp_retransmit_skb, &tid, &args, BPF_ANY);
+
+    return 0;
+}
+
+SEC("fexit/tcp_retransmit_skb")
+int BPF_PROG(tcp_retransmit_skb_exit, struct sock *sk, struct sk_buff *skb, int segs, int err) {
+    bpf_printk("fexit/tcp_retransmit\n");
+    u64 tid = bpf_get_current_pid_tgid();
+    if (err < 0) {
+        bpf_map_delete_elem(&pending_tcp_retransmit_skb, &tid);
+        return 0;
+    }
+    tcp_retransmit_skb_args_t *args = bpf_map_lookup_elem(&pending_tcp_retransmit_skb, &tid);
+    if (args == NULL) {
+        return 0;
+    }
+    u32 retrans_out_pre = args->retrans_out_pre;
+    u32 retrans_out = BPF_CORE_READ(tcp_sk(sk), retrans_out);
+    bpf_map_delete_elem(&pending_tcp_retransmit_skb, &tid);
+
+    if (retrans_out < 0) {
+        return 0;
+    }
+
+    return handle_retransmit(sk, retrans_out-retrans_out_pre);
+}
+
+SEC("fexit/tcp_recvmsg")
+int BPF_PROG(tcp_recvmsg_exit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int copied) {
+    bpf_printk("fexit/tcp_recvmsg");
+    if (copied < 0) { // error
+        return 0;
+    }
+
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    return handle_tcp_recv(pid_tgid, sk, copied);
+}
+
 SEC("fentry/sockfd_lookup_light")
 int BPF_PROG(sockfd_lookup_light, int fd, int *err, int *fput_needed, struct socket *socket)
 {
@@ -164,53 +212,4 @@ int BPF_PROG(sockfd_lookup_light_exit, int fd, int *err, int *fput_needed, struc
     bpf_map_update_elem(&sock_by_pid_fd, &pid_fd, &sock, BPF_ANY);
 
 	return 0;
-}
-
-SEC("fentry/tcp_retransmit_skb")
-int BPF_PROG(tcp_retransmit_skb, struct sock *sk, struct sk_buff *skb, int segs, int err) {
-    bpf_printk("fexntry/tcp_retransmit\n");
-    u64 tid = bpf_get_current_pid_tgid();
-    tcp_retransmit_skb_args_t args = {};
-    args.retrans_out_pre = BPF_CORE_READ(tcp_sk(sk), retrans_out);
-    if (args.retrans_out_pre < 0) {
-        return 0;
-    }
-
-    bpf_map_update_elem(&pending_tcp_retransmit_skb, &tid, &args, BPF_ANY);
-
-    return 0;
-}
-
-SEC("fexit/tcp_retransmit_skb")
-int BPF_PROG(tcp_retransmit_skb_exit, struct sock *sk, struct sk_buff *skb, int segs, int err) {
-    bpf_printk("fexit/tcp_retransmit\n");
-    u64 tid = bpf_get_current_pid_tgid();
-    if (err < 0) {
-        bpf_map_delete_elem(&pending_tcp_retransmit_skb, &tid);
-        return 0;
-    }
-    tcp_retransmit_skb_args_t *args = bpf_map_lookup_elem(&pending_tcp_retransmit_skb, &tid);
-    if (args == NULL) {
-        return 0;
-    }
-    u32 retrans_out_pre = args->retrans_out_pre;
-    u32 retrans_out = BPF_CORE_READ(tcp_sk(sk), retrans_out);
-    bpf_map_delete_elem(&pending_tcp_retransmit_skb, &tid);
-
-    if (retrans_out < 0) {
-        return 0;
-    }
-
-    return handle_retransmit(sk, retrans_out-retrans_out_pre);
-}
-
-SEC("fexit/tcp_recvmsg")
-int BPF_PROG(tcp_recvmsg_exit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int copied) {
-    bpf_printk("fexit/tcp_recvmsg");
-    if (copied < 0) { // error
-        return 0;
-    }
-
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    return handle_tcp_recv(pid_tgid, sk, copied);
 }

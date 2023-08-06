@@ -304,6 +304,11 @@ static __always_inline int handle_message(conn_tuple_t *t, size_t sent_bytes, si
     return 0;
 }
 
+static __always_inline void get_tcp_segment_counts(struct sock* skp, __u32* packets_in, __u32* packets_out) {
+    BPF_CORE_READ_INTO(packets_out, tcp_sk(skp), segs_out);
+    BPF_CORE_READ_INTO(packets_in, tcp_sk(skp), segs_in);
+}
+
 static __always_inline int handle_tcp_recv(u64 pid_tgid, struct sock *skp, int recv) {
     conn_tuple_t t = {};
     if (!read_conn_tuple(&t, skp, pid_tgid, CONN_TYPE_TCP)) {
