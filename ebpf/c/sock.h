@@ -111,6 +111,41 @@ static u16 read_dport(struct sock *skp)
 	return bpf_ntohs(dport);
 }
 
+static __always_inline void read_in6_addr(u64 *addr_h, u64 *addr_l, const struct in6_addr *in6) {
+    BPF_CORE_READ_INTO(addr_h, in6, in6_u.u6_addr32[0]);
+    BPF_CORE_READ_INTO(addr_l, in6, in6_u.u6_addr32[2]);
+}
+
+static __always_inline void read_saddr_v6(struct sock *skp, u64 *addr_h, u64 *addr_l) {
+    struct in6_addr in6 = {};
+    BPF_CORE_READ_INTO(&in6, &(skp->__sk_common), skc_v6_rcv_saddr);
+    read_in6_addr(addr_h, addr_l, &in6);
+}
+
+static __always_inline void read_daddr_v6(struct sock *skp, u64 *addr_h, u64 *addr_l) {
+    struct in6_addr in6 = {};
+    BPF_CORE_READ_INTO(&in6, &(skp->__sk_common), skc_v6_daddr);
+    read_in6_addr(addr_h, addr_l, &in6);
+}
+
+/* check if IPs are IPv4 mapped to IPv6 ::ffff:xxxx:xxxx
+ * https://tools.ietf.org/html/rfc4291#section-2.5.5
+ * the addresses are stored in network byte order so IPv4 adddress is stored
+ * in the most significant 32 bits of part saddr_l and daddr_l.
+ * Meanwhile the end of the mask is stored in the least significant 32 bits.
+ */
+// On older kernels, clang can generate Wunused-function warnings on static inline functions defined in
+// header files, even if they are later used in source files. __maybe_unused prevents that issue
+static __always_inline bool is_ipv4_mapped_ipv6(__u64 saddr_h, __u64 saddr_l, __u64 daddr_h, __u64 daddr_l) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    return ((saddr_h == 0 && ((__u32)saddr_l == 0xFFFF0000)) || (daddr_h == 0 && ((__u32)daddr_l == 0xFFFF0000)));
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    return ((saddr_h == 0 && ((__u32)(saddr_l >> 32) == 0x0000FFFF)) || (daddr_h == 0 && ((__u32)(daddr_l >> 32) == 0x0000FFFF)));
+#else
+#error "Fix your compiler's __BYTE_ORDER__?!"
+#endif
+}
+
 static __always_inline int read_conn_tuple(conn_tuple_t *t, struct sock *skp, u64 pid_tgid, metadata_mask_t type)
 {
 	int err = 0;
@@ -140,7 +175,37 @@ static __always_inline int read_conn_tuple(conn_tuple_t *t, struct sock *skp, u6
 	}
 	else if (family == AF_INET6)
 	{
-		// Implement: https://github.com/DataDog/datadog-agent/blob/5bf359eaf21bdbefa2ba3448b8cfb9ac229a974b/pkg/network/ebpf/c/sock.h#L204-L238
+        if (!(t->saddr_h || t->saddr_l)) {
+            read_saddr_v6(skp, &t->saddr_h, &t->saddr_l);
+        }
+        if (!(t->daddr_h || t->daddr_l)) {
+            read_daddr_v6(skp, &t->daddr_h, &t->daddr_l);
+        }
+
+        /* We can only pass 4 args to bpf_trace_printk */
+        /* so split those 2 statements to be able to log everything */
+        if (!(t->saddr_h || t->saddr_l)) {
+            bpf_printk("ERR(read_conn_tuple.v6): src addr not set: src_l:%d,src_h:%d\n",
+                t->saddr_l, t->saddr_h);
+            err = 1;
+        }
+
+        if (!(t->daddr_h || t->daddr_l)) {
+            bpf_printk("ERR(read_conn_tuple.v6): dst addr not set: dst_l:%d,dst_h:%d\n",
+                t->daddr_l, t->daddr_h);
+            err = 1;
+        }
+
+        // Check if we can map IPv6 to IPv4
+        if (is_ipv4_mapped_ipv6(t->saddr_h, t->saddr_l, t->daddr_h, t->daddr_l)) {
+            t->metadata |= CONN_V4;
+            t->saddr_h = 0;
+            t->daddr_h = 0;
+            t->saddr_l = (__u32)(t->saddr_l >> 32);
+            t->daddr_l = (__u32)(t->daddr_l >> 32);
+        } else {
+            t->metadata |= CONN_V6;
+        }
 	}
 	else
 	{
