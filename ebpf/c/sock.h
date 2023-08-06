@@ -9,28 +9,6 @@
 #define inet_daddr sk.__sk_common.skc_daddr
 #define inet_dport sk.__sk_common.skc_dport
 
-/* The LOAD_CONSTANT macro is used to define a named constant that will be replaced
- * at runtime by the Go code. This replaces usage of a bpf_map for storing values, which
- * eliminates a bpf_map_lookup_elem per kprobe hit. The constants are best accessed with a
- * dedicated inlined function.
- */
-#define LOAD_CONSTANT(param, var) asm("%0 = " param " ll" \
-									  : "=r"(var))
-
-static __always_inline __u64 offset_netns()
-{
-	__u64 val = 0;
-	LOAD_CONSTANT("offset_netns", val);
-	return val;
-}
-
-static __always_inline __u64 offset_ino()
-{
-	__u64 val = 0;
-	LOAD_CONSTANT("offset_ino", val);
-	return val;
-}
-
 static __always_inline struct tcp_sock *tcp_sk(const struct sock *sk) 
 {
 	return (struct tcp_sock *)sk;
@@ -47,8 +25,8 @@ static __always_inline __u32 get_netns_from_sock(struct sock *sk)
 {
 	void *skc_net = NULL;
 	__u32 net_ns_inum = 0;
-	bpf_probe_read_kernel(&skc_net, sizeof(void *), ((char *)sk) + offset_netns());
-	bpf_probe_read_kernel(&net_ns_inum, sizeof(net_ns_inum), ((char *)skc_net) + offset_ino());
+	bpf_probe_read_kernel(&skc_net, sizeof(void *), ((char *)sk));
+	bpf_probe_read_kernel(&net_ns_inum, sizeof(net_ns_inum), ((char *)skc_net));
 	return net_ns_inum;
 }
 
