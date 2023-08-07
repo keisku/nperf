@@ -1,6 +1,7 @@
 #include "vmlinux.h"
 #include "conn_tuple.h"
 #include "map_defs.h"
+#include "cookie.h"
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
@@ -11,6 +12,12 @@
 #define TCP_FLAGS_OFFSET 13
 
 #define CONN_CLOSED_BATCH_SIZE 4
+
+#define FLAG_FULLY_CLASSIFIED       1 << 0
+#define FLAG_USM_ENABLED            1 << 1
+#define FLAG_NPM_ENABLED            1 << 2
+#define FLAG_TCP_CLOSE_DELETION     1 << 3
+#define FLAG_SOCKET_FILTER_DELETION 1 << 4
 
 typedef enum
 {
@@ -55,6 +62,14 @@ typedef struct
 	protocol_stack_t protocol_stack;
 } conn_stats_ts_t;
 
+// Connection flags
+typedef enum
+{
+    CONN_L_INIT = 1 << 0, // initial/first message sent
+    CONN_R_INIT = 1 << 1, // reply received for initial message from remote
+    CONN_ASSURED = 1 << 2 // "3-way handshake" complete, i.e. response to initial reply sent
+} conn_flags_t;
+
 typedef struct
 {
 	__u32 rtt;
@@ -92,6 +107,11 @@ typedef struct {
     __u32 retrans_out_pre;
 } tcp_retransmit_skb_args_t;
 
+typedef struct {
+    __u32 netns;
+    __u16 port;
+} port_binding_t;
+
 /* This is a key/value store with the keys being a conn_tuple_t for send & recv calls
  * and the values being conn_stats_ts_t *.
  */
@@ -121,6 +141,34 @@ BPF_PERCPU_HASH_MAP(conn_close_batch, __u32, batch_t, 1024)
  * Values: the args of the tcp_retransmit_skb call being instrumented.
  */
 BPF_HASH_MAP(pending_tcp_retransmit_skb, __u64, tcp_retransmit_skb_args_t, 8192)
+
+// Maps a connection tuple to its classified protocol. Used to reduce redundant
+// classification procedures on the same connection
+BPF_HASH_MAP(connection_protocol, conn_tuple_t, protocol_stack_t, 1024)
+
+// Maps skb connection tuple to socket connection tuple.
+// On ingress, skb connection tuple is pre NAT, and socket connection tuple is post NAT, and on egress, the opposite.
+// We track the lifecycle of socket using tracepoint net/net_dev_queue.
+// Some protocol can be classified in a single direction (for example HTTP/2 can be classified only by the first 24 bytes
+// sent on the hand shake), and if we have NAT, then the conn tuple we extract from sk_buff will be different than the
+// one we extract from the sock object, and then we are not able to correctly classify those protocols.
+// To overcome those problems, we save two maps that translates from conn tuple of sk_buff to conn tuple of sock* and vice
+// versa (the vice versa is used for cleanup purposes).
+BPF_HASH_MAP(conn_tuple_to_socket_skb_conn_tuple, conn_tuple_t, conn_tuple_t, 1024)
+
+/* This maps tracks listening TCP ports. Entries are added to the map via tracing the inet_csk_accept syscall.  The
+ * key in the map is the network namespace inode together with the port and the value is a flag that
+ * indicates if the port is listening or not. When the socket is destroyed (via tcp_v4_destroy_sock), we set the
+ * value to be "port closed" to indicate that the port is no longer being listened on.  We leave the data in place
+ * for the userspace side to read and clean up
+ */
+BPF_HASH_MAP(port_bindings, port_binding_t, __u32, 1024)
+
+/* This behaves the same as port_bindings, except it tracks UDP ports.
+ * Key: a port
+ * Value: one of PORT_CLOSED, and PORT_OPEN
+ */
+BPF_HASH_MAP(udp_port_bindings, port_binding_t, __u32, 1024)
 
 struct
 {
@@ -298,9 +346,162 @@ static __always_inline void handle_tcp_stats(conn_tuple_t* t, struct sock* sk, u
     update_tcp_stats(t, stats);
 }
 
+static __always_inline conn_stats_ts_t *get_conn_stats(conn_tuple_t *t, struct sock *sk) {
+    conn_stats_ts_t *cs = bpf_map_lookup_elem(&conn_stats, t);
+    if (cs) {
+        return cs;
+    }
+
+    // initialize-if-no-exist the connection stat, and load it
+    conn_stats_ts_t empty = {};
+    empty.cookie = get_sk_cookie(sk);
+    bpf_map_update_elem(&conn_stats, t, &empty, BPF_NOEXIST);
+    return bpf_map_lookup_elem(&conn_stats, t);
+}
+
+// is_fully_classified returns true if all layers are set or if
+// `mark_as_fully_classified` was previously called for this `stack`
+static __always_inline bool is_fully_classified(protocol_stack_t *stack) {
+    if (!stack) {
+        return false;
+    }
+
+    return stack->flags&FLAG_FULLY_CLASSIFIED ||
+        (stack->layer_api > 0 &&
+         stack->layer_application > 0 &&
+         stack->layer_encryption > 0);
+}
+
+static __always_inline void set_protocol_flag(protocol_stack_t *stack, u8 flag) {
+    if (!stack) {
+        return;
+    }
+
+    stack->flags |= flag;
+}
+
+
+// merge_protocol_stacks modifies `this` by merging it with `that`
+static __always_inline void merge_protocol_stacks(protocol_stack_t *this, protocol_stack_t *that) {
+    if (!this || !that) {
+        return;
+    }
+
+    if (!this->layer_api) {
+        this->layer_api = that->layer_api;
+    }
+    if (!this->layer_application) {
+        this->layer_application = that->layer_application;
+    }
+    if (!this->layer_encryption) {
+        this->layer_encryption = that->layer_encryption;
+    }
+
+    this->flags |= that->flags;
+}
+
+static __always_inline void update_protocol_classification_information(conn_tuple_t *t, conn_stats_ts_t *stats) {
+    if (is_fully_classified(&stats->protocol_stack)) {
+        return;
+    }
+
+    conn_tuple_t conn_tuple_copy = *t;
+    // The classifier is a socket filter and there we are not accessible for pid and netns.
+    // The key is based of the source & dest addresses and ports, and the metadata.
+    conn_tuple_copy.netns = 0;
+    conn_tuple_copy.pid = 0;
+
+    protocol_stack_t *protocol_stack = bpf_map_lookup_elem(&connection_protocol, &conn_tuple_copy);
+    set_protocol_flag(protocol_stack, FLAG_NPM_ENABLED);
+    merge_protocol_stacks(&stats->protocol_stack, protocol_stack);
+
+    conn_tuple_t *cached_skb_conn_tup_ptr = bpf_map_lookup_elem(&conn_tuple_to_socket_skb_conn_tuple, &conn_tuple_copy);
+    if (!cached_skb_conn_tup_ptr) {
+        return;
+    }
+
+    conn_tuple_copy = *cached_skb_conn_tup_ptr;
+    protocol_stack = bpf_map_lookup_elem(&connection_protocol, &conn_tuple_copy);
+    set_protocol_flag(protocol_stack, FLAG_NPM_ENABLED);
+    merge_protocol_stacks(&stats->protocol_stack, protocol_stack);
+}
+
+static __always_inline void update_conn_state(conn_tuple_t *t, conn_stats_ts_t *stats, size_t sent_bytes, size_t recv_bytes) {
+    if (t->metadata & CONN_TYPE_TCP || stats->flags & CONN_ASSURED) {
+        return;
+    }
+
+    if (stats->recv_bytes == 0 && sent_bytes > 0) {
+        stats->flags |= CONN_L_INIT;
+        return;
+    }
+
+    if (stats->sent_bytes == 0 && recv_bytes > 0) {
+        stats->flags |= CONN_R_INIT;
+        return;
+    }
+
+    // If a three-way "handshake" was established, we mark the connection as assured
+    if ((stats->flags & CONN_L_INIT && stats->recv_bytes > 0 && sent_bytes > 0) || (stats->flags & CONN_R_INIT && stats->sent_bytes > 0 && recv_bytes > 0)) {
+        stats->flags |= CONN_ASSURED;
+    }
+}
+
+// update_conn_stats update the connection metadata : protocol, tags, timestamp, direction, packets, bytes sent and received
+static __always_inline void update_conn_stats(conn_tuple_t *t, size_t sent_bytes, size_t recv_bytes, u64 ts, conn_direction_t dir,
+    __u32 packets_out, __u32 packets_in, packet_count_increment_t segs_type, struct sock *sk) {
+    conn_stats_ts_t *val = NULL;
+    val = get_conn_stats(t, sk);
+    if (!val) {
+        return;
+    }
+
+    update_protocol_classification_information(t, val);
+
+    // If already in our map, increment size in-place
+    update_conn_state(t, val, sent_bytes, recv_bytes);
+    if (sent_bytes) {
+        __sync_fetch_and_add(&val->sent_bytes, sent_bytes);
+    }
+    if (recv_bytes) {
+        __sync_fetch_and_add(&val->recv_bytes, recv_bytes);
+    }
+    if (packets_in) {
+        if (segs_type == PACKET_COUNT_INCREMENT) {
+            __sync_fetch_and_add(&val->recv_packets, packets_in);
+        } else if (segs_type == PACKET_COUNT_ABSOLUTE) {
+            val->recv_packets = packets_in;
+        }
+    }
+    if (packets_out) {
+        if (segs_type == PACKET_COUNT_INCREMENT) {
+            __sync_fetch_and_add(&val->sent_packets, packets_out);
+        } else if (segs_type == PACKET_COUNT_ABSOLUTE) {
+            val->sent_packets = packets_out;
+        }
+    }
+    val->timestamp = ts;
+
+    if (dir != CONN_DIRECTION_UNKNOWN) {
+        val->direction = dir;
+    } else if (val->direction == CONN_DIRECTION_UNKNOWN) {
+        u32 *port_count = NULL;
+        port_binding_t pb = {};
+        pb.port = t->sport;
+        pb.netns = t->netns;
+        if (t->metadata & CONN_TYPE_TCP) {
+            port_count = bpf_map_lookup_elem(&port_bindings, &pb);
+        } else {
+            port_count = bpf_map_lookup_elem(&udp_port_bindings, &pb);
+        }
+        val->direction = (port_count != NULL && *port_count > 0) ? CONN_DIRECTION_INCOMING : CONN_DIRECTION_OUTGOING;
+    }
+}
+
 static __always_inline int handle_message(conn_tuple_t *t, size_t sent_bytes, size_t recv_bytes, conn_direction_t dir,
     __u32 packets_out, __u32 packets_in, packet_count_increment_t segs_type, struct sock *sk) {
-	// TODO: https://github.com/DataDog/datadog-agent/blob/5bf359eaf21bdbefa2ba3448b8cfb9ac229a974b/pkg/network/ebpf/c/tracer/stats.h#L161
+    u64 ts = bpf_ktime_get_ns();
+    update_conn_stats(t, sent_bytes, recv_bytes, ts, dir, packets_out, packets_in, segs_type, sk);
     return 0;
 }
 

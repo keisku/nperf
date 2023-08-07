@@ -10,16 +10,9 @@
 #define inet_daddr sk.__sk_common.skc_daddr
 #define inet_dport sk.__sk_common.skc_dport
 
-static __always_inline struct tcp_sock *tcp_sk(const struct sock *sk) 
+static __always_inline struct tcp_sock *tcp_sk(const struct sock *sk)
 {
-	return (struct tcp_sock *)sk;
-}
-
-static __always_inline struct sock *socket_sk(struct socket *sock)
-{
-	struct sock *sk = NULL;
-	BPF_CORE_READ_INTO(&sk, sock, sk);
-	return sk;
+    return (struct tcp_sock *)sk;
 }
 
 static __always_inline __u32 get_netns_from_sock(struct sock *sk)

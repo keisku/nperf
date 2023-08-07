@@ -75,17 +75,21 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	ConnCloseBatch          *ebpf.MapSpec `ebpf:"conn_close_batch"`
-	ConnCloseEvent          *ebpf.MapSpec `ebpf:"conn_close_event"`
-	ConnStats               *ebpf.MapSpec `ebpf:"conn_stats"`
-	Events                  *ebpf.MapSpec `ebpf:"events"`
-	PendingTcpRetransmitSkb *ebpf.MapSpec `ebpf:"pending_tcp_retransmit_skb"`
-	PidFdBySock             *ebpf.MapSpec `ebpf:"pid_fd_by_sock"`
-	SockByPidFd             *ebpf.MapSpec `ebpf:"sock_by_pid_fd"`
-	SockfdLookupArgs        *ebpf.MapSpec `ebpf:"sockfd_lookup_args"`
-	TcpOngoingConnectPid    *ebpf.MapSpec `ebpf:"tcp_ongoing_connect_pid"`
-	TcpRetransmits          *ebpf.MapSpec `ebpf:"tcp_retransmits"`
-	TcpStats                *ebpf.MapSpec `ebpf:"tcp_stats"`
+	ConnCloseBatch                *ebpf.MapSpec `ebpf:"conn_close_batch"`
+	ConnCloseEvent                *ebpf.MapSpec `ebpf:"conn_close_event"`
+	ConnStats                     *ebpf.MapSpec `ebpf:"conn_stats"`
+	ConnTupleToSocketSkbConnTuple *ebpf.MapSpec `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
+	ConnectionProtocol            *ebpf.MapSpec `ebpf:"connection_protocol"`
+	Events                        *ebpf.MapSpec `ebpf:"events"`
+	PendingTcpRetransmitSkb       *ebpf.MapSpec `ebpf:"pending_tcp_retransmit_skb"`
+	PidFdBySock                   *ebpf.MapSpec `ebpf:"pid_fd_by_sock"`
+	PortBindings                  *ebpf.MapSpec `ebpf:"port_bindings"`
+	SockByPidFd                   *ebpf.MapSpec `ebpf:"sock_by_pid_fd"`
+	SockfdLookupArgs              *ebpf.MapSpec `ebpf:"sockfd_lookup_args"`
+	TcpOngoingConnectPid          *ebpf.MapSpec `ebpf:"tcp_ongoing_connect_pid"`
+	TcpRetransmits                *ebpf.MapSpec `ebpf:"tcp_retransmits"`
+	TcpStats                      *ebpf.MapSpec `ebpf:"tcp_stats"`
+	UdpPortBindings               *ebpf.MapSpec `ebpf:"udp_port_bindings"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -107,17 +111,21 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	ConnCloseBatch          *ebpf.Map `ebpf:"conn_close_batch"`
-	ConnCloseEvent          *ebpf.Map `ebpf:"conn_close_event"`
-	ConnStats               *ebpf.Map `ebpf:"conn_stats"`
-	Events                  *ebpf.Map `ebpf:"events"`
-	PendingTcpRetransmitSkb *ebpf.Map `ebpf:"pending_tcp_retransmit_skb"`
-	PidFdBySock             *ebpf.Map `ebpf:"pid_fd_by_sock"`
-	SockByPidFd             *ebpf.Map `ebpf:"sock_by_pid_fd"`
-	SockfdLookupArgs        *ebpf.Map `ebpf:"sockfd_lookup_args"`
-	TcpOngoingConnectPid    *ebpf.Map `ebpf:"tcp_ongoing_connect_pid"`
-	TcpRetransmits          *ebpf.Map `ebpf:"tcp_retransmits"`
-	TcpStats                *ebpf.Map `ebpf:"tcp_stats"`
+	ConnCloseBatch                *ebpf.Map `ebpf:"conn_close_batch"`
+	ConnCloseEvent                *ebpf.Map `ebpf:"conn_close_event"`
+	ConnStats                     *ebpf.Map `ebpf:"conn_stats"`
+	ConnTupleToSocketSkbConnTuple *ebpf.Map `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
+	ConnectionProtocol            *ebpf.Map `ebpf:"connection_protocol"`
+	Events                        *ebpf.Map `ebpf:"events"`
+	PendingTcpRetransmitSkb       *ebpf.Map `ebpf:"pending_tcp_retransmit_skb"`
+	PidFdBySock                   *ebpf.Map `ebpf:"pid_fd_by_sock"`
+	PortBindings                  *ebpf.Map `ebpf:"port_bindings"`
+	SockByPidFd                   *ebpf.Map `ebpf:"sock_by_pid_fd"`
+	SockfdLookupArgs              *ebpf.Map `ebpf:"sockfd_lookup_args"`
+	TcpOngoingConnectPid          *ebpf.Map `ebpf:"tcp_ongoing_connect_pid"`
+	TcpRetransmits                *ebpf.Map `ebpf:"tcp_retransmits"`
+	TcpStats                      *ebpf.Map `ebpf:"tcp_stats"`
+	UdpPortBindings               *ebpf.Map `ebpf:"udp_port_bindings"`
 }
 
 func (m *bpfMaps) Close() error {
@@ -125,14 +133,18 @@ func (m *bpfMaps) Close() error {
 		m.ConnCloseBatch,
 		m.ConnCloseEvent,
 		m.ConnStats,
+		m.ConnTupleToSocketSkbConnTuple,
+		m.ConnectionProtocol,
 		m.Events,
 		m.PendingTcpRetransmitSkb,
 		m.PidFdBySock,
+		m.PortBindings,
 		m.SockByPidFd,
 		m.SockfdLookupArgs,
 		m.TcpOngoingConnectPid,
 		m.TcpRetransmits,
 		m.TcpStats,
+		m.UdpPortBindings,
 	)
 }
 
