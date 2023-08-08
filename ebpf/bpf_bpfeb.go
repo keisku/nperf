@@ -61,14 +61,12 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
-	SockfdLookupLight     *ebpf.ProgramSpec `ebpf:"sockfd_lookup_light"`
-	SockfdLookupLightExit *ebpf.ProgramSpec `ebpf:"sockfd_lookup_light_exit"`
-	TcpClose              *ebpf.ProgramSpec `ebpf:"tcp_close"`
-	TcpCloseExit          *ebpf.ProgramSpec `ebpf:"tcp_close_exit"`
-	TcpConnect            *ebpf.ProgramSpec `ebpf:"tcp_connect"`
-	TcpRecvmsgExit        *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_exit"`
-	TcpRetransmitSkb      *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb"`
-	TcpRetransmitSkbExit  *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb_exit"`
+	TcpClose             *ebpf.ProgramSpec `ebpf:"tcp_close"`
+	TcpCloseExit         *ebpf.ProgramSpec `ebpf:"tcp_close_exit"`
+	TcpConnect           *ebpf.ProgramSpec `ebpf:"tcp_connect"`
+	TcpRecvmsgExit       *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_exit"`
+	TcpRetransmitSkb     *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb"`
+	TcpRetransmitSkbExit *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb_exit"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
@@ -81,10 +79,7 @@ type bpfMapSpecs struct {
 	ConnTupleToSocketSkbConnTuple *ebpf.MapSpec `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
 	Events                        *ebpf.MapSpec `ebpf:"events"`
 	PendingTcpRetransmitSkb       *ebpf.MapSpec `ebpf:"pending_tcp_retransmit_skb"`
-	PidFdBySock                   *ebpf.MapSpec `ebpf:"pid_fd_by_sock"`
 	PortBindings                  *ebpf.MapSpec `ebpf:"port_bindings"`
-	SockByPidFd                   *ebpf.MapSpec `ebpf:"sock_by_pid_fd"`
-	SockfdLookupArgs              *ebpf.MapSpec `ebpf:"sockfd_lookup_args"`
 	TcpOngoingConnectPid          *ebpf.MapSpec `ebpf:"tcp_ongoing_connect_pid"`
 	TcpRetransmits                *ebpf.MapSpec `ebpf:"tcp_retransmits"`
 	TcpStats                      *ebpf.MapSpec `ebpf:"tcp_stats"`
@@ -116,10 +111,7 @@ type bpfMaps struct {
 	ConnTupleToSocketSkbConnTuple *ebpf.Map `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
 	Events                        *ebpf.Map `ebpf:"events"`
 	PendingTcpRetransmitSkb       *ebpf.Map `ebpf:"pending_tcp_retransmit_skb"`
-	PidFdBySock                   *ebpf.Map `ebpf:"pid_fd_by_sock"`
 	PortBindings                  *ebpf.Map `ebpf:"port_bindings"`
-	SockByPidFd                   *ebpf.Map `ebpf:"sock_by_pid_fd"`
-	SockfdLookupArgs              *ebpf.Map `ebpf:"sockfd_lookup_args"`
 	TcpOngoingConnectPid          *ebpf.Map `ebpf:"tcp_ongoing_connect_pid"`
 	TcpRetransmits                *ebpf.Map `ebpf:"tcp_retransmits"`
 	TcpStats                      *ebpf.Map `ebpf:"tcp_stats"`
@@ -134,10 +126,7 @@ func (m *bpfMaps) Close() error {
 		m.ConnTupleToSocketSkbConnTuple,
 		m.Events,
 		m.PendingTcpRetransmitSkb,
-		m.PidFdBySock,
 		m.PortBindings,
-		m.SockByPidFd,
-		m.SockfdLookupArgs,
 		m.TcpOngoingConnectPid,
 		m.TcpRetransmits,
 		m.TcpStats,
@@ -149,20 +138,16 @@ func (m *bpfMaps) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
-	SockfdLookupLight     *ebpf.Program `ebpf:"sockfd_lookup_light"`
-	SockfdLookupLightExit *ebpf.Program `ebpf:"sockfd_lookup_light_exit"`
-	TcpClose              *ebpf.Program `ebpf:"tcp_close"`
-	TcpCloseExit          *ebpf.Program `ebpf:"tcp_close_exit"`
-	TcpConnect            *ebpf.Program `ebpf:"tcp_connect"`
-	TcpRecvmsgExit        *ebpf.Program `ebpf:"tcp_recvmsg_exit"`
-	TcpRetransmitSkb      *ebpf.Program `ebpf:"tcp_retransmit_skb"`
-	TcpRetransmitSkbExit  *ebpf.Program `ebpf:"tcp_retransmit_skb_exit"`
+	TcpClose             *ebpf.Program `ebpf:"tcp_close"`
+	TcpCloseExit         *ebpf.Program `ebpf:"tcp_close_exit"`
+	TcpConnect           *ebpf.Program `ebpf:"tcp_connect"`
+	TcpRecvmsgExit       *ebpf.Program `ebpf:"tcp_recvmsg_exit"`
+	TcpRetransmitSkb     *ebpf.Program `ebpf:"tcp_retransmit_skb"`
+	TcpRetransmitSkbExit *ebpf.Program `ebpf:"tcp_retransmit_skb_exit"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
-		p.SockfdLookupLight,
-		p.SockfdLookupLightExit,
 		p.TcpClose,
 		p.TcpCloseExit,
 		p.TcpConnect,

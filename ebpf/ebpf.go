@@ -63,8 +63,6 @@ func Start() (func(), error) {
 	linkTracingOptions := []link.TracingOptions{
 		{Program: objs.TcpClose},
 		{Program: objs.TcpCloseExit},
-		{Program: objs.SockfdLookupLight},
-		{Program: objs.SockfdLookupLightExit},
 		{Program: objs.TcpRecvmsgExit},
 		{Program: objs.TcpRetransmitSkb},
 		{Program: objs.TcpRetransmitSkbExit},

@@ -1,7 +1,6 @@
 #include "vmlinux.h"
 #include "conn_tuple.h"
 #include "sock.h"
-#include "sockfd.h"
 #include "tcp.h"
 
 #include <bpf/bpf_helpers.h>
@@ -65,8 +64,6 @@ int BPF_PROG(tcp_close, struct sock *sk, long timeout) {
 
     // Should actually delete something only if the connection never got established
     bpf_map_delete_elem(&tcp_ongoing_connect_pid, &sk);
-
-    clear_sockfd_maps(sk);
 
     // Get network namespace id
     if (!read_conn_tuple(&t, sk, pid_tgid, CONN_TYPE_TCP)) {
@@ -133,45 +130,4 @@ int BPF_PROG(tcp_recvmsg_exit, struct sock *sk, struct msghdr *msg, size_t len, 
 
     u64 pid_tgid = bpf_get_current_pid_tgid();
     return handle_tcp_recv(pid_tgid, sk, copied);
-}
-
-SEC("fexit/sockfd_lookup_light")
-int BPF_PROG(sockfd_lookup_light_exit, int fd, int *err, int *fput_needed, struct socket *socket) {
-    bpf_printk("fexit/sockfd_lookup_light\n");
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    pid_fd_t key = {
-        .pid = pid_tgid >> 32,
-        .fd = fd,
-    };
-
-    struct sock **skpp = bpf_map_lookup_elem(&sock_by_pid_fd, &key);
-    if (skpp != NULL) {
-        return 0;
-    }
-
-    // For now let's only store information for TCP sockets
-    const struct proto_ops *proto_ops = BPF_CORE_READ(socket, ops);
-    if (!proto_ops) {
-        return 0;
-    }
-
-    enum sock_type sock_type = BPF_CORE_READ(socket, type);
-    int family = BPF_CORE_READ(proto_ops, family);
-    if (sock_type != SOCK_STREAM || !(family == AF_INET || family == AF_INET6)) {
-        return 0;
-    }
-
-    // Retrieve struct sock* pointer from struct socket*
-    struct sock *sock = BPF_CORE_READ(socket, sk);
-
-    pid_fd_t pid_fd = {
-        .pid = pid_tgid >> 32,
-        .fd = fd,
-    };
-
-    // These entries are cleaned up by tcp_close
-    bpf_map_update_elem(&pid_fd_by_sock, &sock, &pid_fd, BPF_ANY);
-    bpf_map_update_elem(&sock_by_pid_fd, &pid_fd, &sock, BPF_ANY);
-
-    return 0;
 }
