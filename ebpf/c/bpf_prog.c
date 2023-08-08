@@ -135,38 +135,10 @@ int BPF_PROG(tcp_recvmsg_exit, struct sock *sk, struct msghdr *msg, size_t len, 
     return handle_tcp_recv(pid_tgid, sk, copied);
 }
 
-SEC("fentry/sockfd_lookup_light")
-int BPF_PROG(sockfd_lookup_light, int fd, int *err, int *fput_needed, struct socket *socket) {
-    bpf_printk("fentry/sockfd_lookup_light\n");
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-
-    // Check if have already a map entry for this pid_fd_t
-    // TODO: This lookup eliminates *4* map operations for existing entries
-    // but can reduce the accuracy of programs relying on socket FDs for
-    // processes with a lot of FD churn
-    pid_fd_t key = {
-        .pid = pid_tgid >> 32,
-        .fd = fd,
-    };
-    struct sock **sock = bpf_map_lookup_elem(&sock_by_pid_fd, &key);
-    if (sock != NULL) {
-        return 0;
-    }
-
-    bpf_map_update_elem(&sockfd_lookup_args, &pid_tgid, &fd, BPF_ANY);
-    return 0;
-}
-
-// * an index of pid_fd_t to a struct sock*;
-// * an index of struct sock* to pid_fd_t;
 SEC("fexit/sockfd_lookup_light")
 int BPF_PROG(sockfd_lookup_light_exit, int fd, int *err, int *fput_needed, struct socket *socket) {
     bpf_printk("fexit/sockfd_lookup_light\n");
     u64 pid_tgid = bpf_get_current_pid_tgid();
-    // Check if have already a map entry for this pid_fd_t
-    // TODO: This lookup eliminates *4* map operations for existing entries
-    // but can reduce the accuracy of programs relying on socket FDs for
-    // processes with a lot of FD churn
     pid_fd_t key = {
         .pid = pid_tgid >> 32,
         .fd = fd,
