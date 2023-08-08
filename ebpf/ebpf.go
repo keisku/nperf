@@ -23,6 +23,14 @@ func Start() (func(), error) {
 		{Program: objs.TcpRecvmsgExit},
 		{Program: objs.TcpRetransmitSkb},
 		{Program: objs.TcpRetransmitSkbExit},
+		{Program: objs.TcpConnect},
+		{Program: objs.TcpFinishConnect},
+		{Program: objs.InetCskAcceptExit},
+		{Program: objs.InetCskListenStop},
+		{Program: objs.InetBind},
+		{Program: objs.InetBindExit},
+		{Program: objs.Inet6Bind},
+		{Program: objs.Inet6BindExit},
 	}
 	links := make([]link.Link, len(linkTracingOptions))
 	for i, opt := range linkTracingOptions {
