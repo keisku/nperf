@@ -13,21 +13,19 @@
 
 #define CONN_CLOSED_BATCH_SIZE 4
 
-#define FLAG_FULLY_CLASSIFIED       1 << 0
-#define FLAG_USM_ENABLED            1 << 1
-#define FLAG_NPM_ENABLED            1 << 2
-#define FLAG_TCP_CLOSE_DELETION     1 << 3
+#define FLAG_FULLY_CLASSIFIED 1 << 0
+#define FLAG_USM_ENABLED 1 << 1
+#define FLAG_NPM_ENABLED 1 << 2
+#define FLAG_TCP_CLOSE_DELETION 1 << 3
 #define FLAG_SOCKET_FILTER_DELETION 1 << 4
 
-typedef enum
-{
+typedef enum {
     CONN_DIRECTION_UNKNOWN = 0b00,
     CONN_DIRECTION_INCOMING = 0b01,
     CONN_DIRECTION_OUTGOING = 0b10,
 } conn_direction_t;
 
-typedef enum
-{
+typedef enum {
     PACKET_COUNT_NONE = 0,
     PACKET_COUNT_ABSOLUTE = 1,
     PACKET_COUNT_INCREMENT = 2,
@@ -35,36 +33,35 @@ typedef enum
 
 typedef struct
 {
-	__u8 layer_api;
-	__u8 layer_application;
-	__u8 layer_encryption;
-	__u8 flags;
+    __u8 layer_api;
+    __u8 layer_application;
+    __u8 layer_encryption;
+    __u8 flags;
 } protocol_stack_t;
 
 typedef struct
 {
-	__u64 sent_bytes;
-	__u64 recv_bytes;
-	__u64 timestamp;
-	__u32 flags;
-	// "cookie" that uniquely identifies
-	// a conn_stas_ts_t. This is used
-	// in user space to distinguish between
-	// stats for two or more connections that
-	// may share the same conn_tuple_t (this can
-	// happen when we're aggregating connections).
-	// This is not the same as a TCP cookie or
-	// the cookie in struct sock in the kernel
-	__u32 cookie;
-	__u64 sent_packets;
-	__u64 recv_packets;
-	__u8 direction;
-	protocol_stack_t protocol_stack;
+    __u64 sent_bytes;
+    __u64 recv_bytes;
+    __u64 timestamp;
+    __u32 flags;
+    // "cookie" that uniquely identifies
+    // a conn_stas_ts_t. This is used
+    // in user space to distinguish between
+    // stats for two or more connections that
+    // may share the same conn_tuple_t (this can
+    // happen when we're aggregating connections).
+    // This is not the same as a TCP cookie or
+    // the cookie in struct sock in the kernel
+    __u32 cookie;
+    __u64 sent_packets;
+    __u64 recv_packets;
+    __u8 direction;
+    protocol_stack_t protocol_stack;
 } conn_stats_ts_t;
 
 // Connection flags
-typedef enum
-{
+typedef enum {
     CONN_L_INIT = 1 << 0, // initial/first message sent
     CONN_R_INIT = 1 << 1, // reply received for initial message from remote
     CONN_ASSURED = 1 << 2 // "3-way handshake" complete, i.e. response to initial reply sent
@@ -72,20 +69,20 @@ typedef enum
 
 typedef struct
 {
-	__u32 rtt;
-	__u32 rtt_var;
+    __u32 rtt;
+    __u32 rtt_var;
 
-	// Bit mask containing all TCP state transitions tracked by our tracer
-	__u16 state_transitions;
+    // Bit mask containing all TCP state transitions tracked by our tracer
+    __u16 state_transitions;
 } tcp_stats_t;
 
 // Full data for a tcp connection
 typedef struct
 {
-	conn_tuple_t tup;
-	conn_stats_ts_t conn_stats;
-	tcp_stats_t tcp_stats;
-	__u32 tcp_retransmits;
+    conn_tuple_t tup;
+    conn_stats_ts_t conn_stats;
+    tcp_stats_t tcp_stats;
+    __u32 tcp_retransmits;
 } conn_t;
 
 // This struct is meant to be used as a container for batching
@@ -93,21 +90,23 @@ typedef struct
 // but apparently eBPF verifier doesn't allow arbitrary index access during runtime.
 typedef struct
 {
-	conn_t c0;
-	conn_t c1;
-	conn_t c2;
-	conn_t c3;
-	__u16 len;
-	__u64 id;
+    conn_t c0;
+    conn_t c1;
+    conn_t c2;
+    conn_t c3;
+    __u16 len;
+    __u64 id;
 } batch_t;
 
-typedef struct {
+typedef struct
+{
     struct sock *sk;
     int segs;
     __u32 retrans_out_pre;
 } tcp_retransmit_skb_args_t;
 
-typedef struct {
+typedef struct
+{
     __u32 netns;
     __u16 port;
 } port_binding_t;
@@ -172,123 +171,107 @@ BPF_HASH_MAP(udp_port_bindings, port_binding_t, __u32, 1024)
 
 struct
 {
-	__uint(type, BPF_MAP_TYPE_RINGBUF);
-	__uint(max_entries, 1 << 24);
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 24);
 } conn_close_event SEC(".maps");
 
-static __always_inline void flush_conn_close_if_full(void *ctx)
-{
-	u32 cpu = bpf_get_smp_processor_id();
-	batch_t *batch_ptr = bpf_map_lookup_elem(&conn_close_batch, &cpu);
-	if (!batch_ptr)
-	{
-		return;
-	}
+static __always_inline void flush_conn_close_if_full(void *ctx) {
+    u32 cpu = bpf_get_smp_processor_id();
+    batch_t *batch_ptr = bpf_map_lookup_elem(&conn_close_batch, &cpu);
+    if (!batch_ptr) {
+        return;
+    }
 
-	if (batch_ptr->len == CONN_CLOSED_BATCH_SIZE)
-	{
-		bpf_printk("Flushing conn_close_batch\n");
-		bpf_ringbuf_output(&conn_close_event, batch_ptr, sizeof(*batch_ptr), 0);
-	}
+    if (batch_ptr->len == CONN_CLOSED_BATCH_SIZE) {
+        bpf_printk("Flushing conn_close_batch\n");
+        bpf_ringbuf_output(&conn_close_event, batch_ptr, sizeof(*batch_ptr), 0);
+    }
 }
 
-static __always_inline int get_proto(conn_tuple_t *t)
-{
-	return (t->metadata & CONN_TYPE_TCP) ? CONN_TYPE_TCP : CONN_TYPE_UDP;
+static __always_inline int get_proto(conn_tuple_t *t) {
+    return (t->metadata & CONN_TYPE_TCP) ? CONN_TYPE_TCP : CONN_TYPE_UDP;
 }
 
-static __always_inline void cleanup_conn(void *ctx, conn_tuple_t *tup, struct sock *sk)
-{
-	u32 cpu = bpf_get_smp_processor_id();
+static __always_inline void cleanup_conn(void *ctx, conn_tuple_t *tup, struct sock *sk) {
+    u32 cpu = bpf_get_smp_processor_id();
 
-	// Will hold the full connection data to send through the perf buffer
-	conn_t conn = {.tup = *tup};
-	conn_stats_ts_t *cst = NULL;
-	tcp_stats_t *tst = NULL;
-	u32 *retrans = NULL;
-	bool is_tcp = get_proto(&conn.tup) == CONN_TYPE_TCP;
-	bool is_udp = get_proto(&conn.tup) == CONN_TYPE_UDP;
+    // Will hold the full connection data to send through the perf buffer
+    conn_t conn = { .tup = *tup };
+    conn_stats_ts_t *cst = NULL;
+    tcp_stats_t *tst = NULL;
+    u32 *retrans = NULL;
+    bool is_tcp = get_proto(&conn.tup) == CONN_TYPE_TCP;
+    bool is_udp = get_proto(&conn.tup) == CONN_TYPE_UDP;
 
-	if (is_tcp)
-	{
-		tst = bpf_map_lookup_elem(&tcp_stats, &(conn.tup));
-		if (tst)
-		{
-			conn.tcp_stats = *tst;
-			bpf_map_delete_elem(&tcp_stats, &(conn.tup));
-		}
+    if (is_tcp) {
+        tst = bpf_map_lookup_elem(&tcp_stats, &(conn.tup));
+        if (tst) {
+            conn.tcp_stats = *tst;
+            bpf_map_delete_elem(&tcp_stats, &(conn.tup));
+        }
 
-		conn.tup.pid = 0;
-		retrans = bpf_map_lookup_elem(&tcp_retransmits, &(conn.tup));
-		if (retrans)
-		{
-			conn.tcp_retransmits = *retrans;
-			bpf_map_delete_elem(&tcp_retransmits, &(conn.tup));
-		}
-		conn.tup.pid = tup->pid;
+        conn.tup.pid = 0;
+        retrans = bpf_map_lookup_elem(&tcp_retransmits, &(conn.tup));
+        if (retrans) {
+            conn.tcp_retransmits = *retrans;
+            bpf_map_delete_elem(&tcp_retransmits, &(conn.tup));
+        }
+        conn.tup.pid = tup->pid;
 
-		conn.tcp_stats.state_transitions |= (1 << TCP_CLOSE);
-	}
+        conn.tcp_stats.state_transitions |= (1 << TCP_CLOSE);
+    }
 
-	cst = bpf_map_lookup_elem(&conn_stats, &(conn.tup));
-	if (is_udp && !cst)
-	{
-		return; // nothing to report
-	}
-	if (is_tcp && !cst && !tst && !retrans)
-	{
-		return; // nothing to report
-	}
+    cst = bpf_map_lookup_elem(&conn_stats, &(conn.tup));
+    if (is_udp && !cst) {
+        return; // nothing to report
+    }
+    if (is_tcp && !cst && !tst && !retrans) {
+        return; // nothing to report
+    }
 
-	if (cst)
-	{
-		conn.conn_stats = *cst;
-		bpf_map_delete_elem(&conn_stats, &(conn.tup));
-	}
-	else
-	{
-		// we don't have any stats for the connection,
-		// so cookie is not set, set it here
-		conn.conn_stats.cookie = bpf_get_prandom_u32();
-	}
+    if (cst) {
+        conn.conn_stats = *cst;
+        bpf_map_delete_elem(&conn_stats, &(conn.tup));
+    } else {
+        // we don't have any stats for the connection,
+        // so cookie is not set, set it here
+        conn.conn_stats.cookie = bpf_get_prandom_u32();
+    }
 
-	conn.conn_stats.timestamp = bpf_ktime_get_ns();
+    conn.conn_stats.timestamp = bpf_ktime_get_ns();
 
-	// Batch TCP closed connections before generating a perf event
-	batch_t *batch_ptr = bpf_map_lookup_elem(&conn_close_batch, &cpu);
-	if (batch_ptr == NULL)
-	{
-		return;
-	}
+    // Batch TCP closed connections before generating a perf event
+    batch_t *batch_ptr = bpf_map_lookup_elem(&conn_close_batch, &cpu);
+    if (batch_ptr == NULL) {
+        return;
+    }
 
-	// TODO: Can we turn this into a macro based on TCP_CLOSED_BATCH_SIZE?
-	switch (batch_ptr->len)
-	{
-	case 0:
-		batch_ptr->c0 = conn;
-		batch_ptr->len++;
-		return;
-	case 1:
-		batch_ptr->c1 = conn;
-		batch_ptr->len++;
-		return;
-	case 2:
-		batch_ptr->c2 = conn;
-		batch_ptr->len++;
-		return;
-	case 3:
-		batch_ptr->c3 = conn;
-		batch_ptr->len++;
-		// In this case the batch is ready to be flushed, which we defer to kretprobe/tcp_close
-		// in order to cope with the eBPF stack limitation of 512 bytes.
-		return;
-	}
+    switch (batch_ptr->len) {
+    case 0:
+        batch_ptr->c0 = conn;
+        batch_ptr->len++;
+        return;
+    case 1:
+        batch_ptr->c1 = conn;
+        batch_ptr->len++;
+        return;
+    case 2:
+        batch_ptr->c2 = conn;
+        batch_ptr->len++;
+        return;
+    case 3:
+        batch_ptr->c3 = conn;
+        batch_ptr->len++;
+        // In this case the batch is ready to be flushed, which we defer to kretprobe/tcp_close
+        // in order to cope with the eBPF stack limitation of 512 bytes.
+        return;
+    }
 
-	// If we hit this section it means we had one or more interleaved tcp_close calls.
-	// We send the connection outside of a batch anyway. This is likely not as
-	// frequent of a case to cause performance issues and avoid cases where
-	// we drop whole connections, which impacts things USM connection matching.
-	bpf_ringbuf_output(&conn_close_event, &conn, sizeof(conn), 0);
+    // If we hit this section it means we had one or more interleaved tcp_close calls.
+    // We send the connection outside of a batch anyway. This is likely not as
+    // frequent of a case to cause performance issues and avoid cases where
+    // we drop whole connections, which impacts things USM connection matching.
+    bpf_ringbuf_output(&conn_close_event, &conn, sizeof(conn), 0);
 }
 
 static __always_inline int handle_retransmit(struct sock *sk, int count) {
@@ -334,7 +317,7 @@ static __always_inline void update_tcp_stats(conn_tuple_t *t, tcp_stats_t stats)
     }
 }
 
-static __always_inline void handle_tcp_stats(conn_tuple_t* t, struct sock* sk, u8 state) {
+static __always_inline void handle_tcp_stats(conn_tuple_t *t, struct sock *sk, u8 state) {
     u32 rtt = 0, rtt_var = 0;
     BPF_CORE_READ_INTO(&rtt, tcp_sk(sk), srtt_us);
     BPF_CORE_READ_INTO(&rtt_var, tcp_sk(sk), mdev_us);
@@ -366,10 +349,10 @@ static __always_inline bool is_fully_classified(protocol_stack_t *stack) {
         return false;
     }
 
-    return stack->flags&FLAG_FULLY_CLASSIFIED ||
-        (stack->layer_api > 0 &&
-         stack->layer_application > 0 &&
-         stack->layer_encryption > 0);
+    return stack->flags & FLAG_FULLY_CLASSIFIED ||
+           (stack->layer_api > 0 &&
+               stack->layer_application > 0 &&
+               stack->layer_encryption > 0);
 }
 
 static __always_inline void set_protocol_flag(protocol_stack_t *stack, u8 flag) {
@@ -379,7 +362,6 @@ static __always_inline void set_protocol_flag(protocol_stack_t *stack, u8 flag) 
 
     stack->flags |= flag;
 }
-
 
 // merge_protocol_stacks modifies `this` by merging it with `that`
 static __always_inline void merge_protocol_stacks(protocol_stack_t *this, protocol_stack_t *that) {
@@ -426,16 +408,21 @@ static __always_inline void update_protocol_classification_information(conn_tupl
     merge_protocol_stacks(&stats->protocol_stack, protocol_stack);
 }
 
+/**
+ * Updates the connection state flags based on the number of bytes sent and received.
+ */
 static __always_inline void update_conn_state(conn_tuple_t *t, conn_stats_ts_t *stats, size_t sent_bytes, size_t recv_bytes) {
     if (t->metadata & CONN_TYPE_TCP || stats->flags & CONN_ASSURED) {
         return;
     }
 
+    // If the connection is not yet initialized, we set the appropriate flag based on the direction of the first packet
     if (stats->recv_bytes == 0 && sent_bytes > 0) {
         stats->flags |= CONN_L_INIT;
         return;
     }
 
+    // If the connection is not yet initialized, we set the appropriate flag based on the direction of the first packet
     if (stats->sent_bytes == 0 && recv_bytes > 0) {
         stats->flags |= CONN_R_INIT;
         return;
@@ -447,7 +434,21 @@ static __always_inline void update_conn_state(conn_tuple_t *t, conn_stats_ts_t *
     }
 }
 
-// update_conn_stats update the connection metadata : protocol, tags, timestamp, direction, packets, bytes sent and received
+/**
+ * Updates the connection metadata with the given parameters.
+ * This includes the protocol, tags, timestamp, direction, packets, and bytes sent and received.
+ * If the connection is not found in the map, this function does nothing.
+ *
+ * @param t The connection tuple.
+ * @param sent_bytes The number of bytes sent.
+ * @param recv_bytes The number of bytes received.
+ * @param ts The timestamp.
+ * @param dir The direction of the connection.
+ * @param packets_out The number of packets sent.
+ * @param packets_in The number of packets received.
+ * @param segs_type The type of packet count increment.
+ * @param sk The socket struct.
+ */
 static __always_inline void update_conn_stats(conn_tuple_t *t, size_t sent_bytes, size_t recv_bytes, u64 ts, conn_direction_t dir,
     __u32 packets_out, __u32 packets_in, packet_count_increment_t segs_type, struct sock *sk) {
     conn_stats_ts_t *val = NULL;
@@ -498,6 +499,21 @@ static __always_inline void update_conn_stats(conn_tuple_t *t, size_t sent_bytes
     }
 }
 
+/**
+ * This function updates connection statistics for a given connection tuple and direction.
+ * It takes in the connection tuple, the number of bytes sent and received, the direction of the connection,
+ * the number of packets sent and received, the type of packet count increment, and the socket structure.
+ * It then updates the connection statistics for the given connection tuple and direction.
+ * @param t The connection tuple for which to update statistics.
+ * @param sent_bytes The number of bytes sent.
+ * @param recv_bytes The number of bytes received.
+ * @param dir The direction of the connection.
+ * @param packets_out The number of packets sent.
+ * @param packets_in The number of packets received.
+ * @param segs_type The type of packet count increment.
+ * @param sk The socket structure.
+ * @return 0 on success.
+ */
 static __always_inline int handle_message(conn_tuple_t *t, size_t sent_bytes, size_t recv_bytes, conn_direction_t dir,
     __u32 packets_out, __u32 packets_in, packet_count_increment_t segs_type, struct sock *sk) {
     u64 ts = bpf_ktime_get_ns();
@@ -505,7 +521,8 @@ static __always_inline int handle_message(conn_tuple_t *t, size_t sent_bytes, si
     return 0;
 }
 
-static __always_inline void get_tcp_segment_counts(struct sock* skp, __u32* packets_in, __u32* packets_out) {
+// Reads the number of incoming and outgoing TCP segments for a given socket.
+static __always_inline void get_tcp_segment_counts(struct sock *skp, __u32 *packets_in, __u32 *packets_out) {
     BPF_CORE_READ_INTO(packets_out, tcp_sk(skp), segs_out);
     BPF_CORE_READ_INTO(packets_in, tcp_sk(skp), segs_in);
 }

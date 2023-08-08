@@ -14,3 +14,6 @@ generate: export BPF_CFLAGS := $(CFLAGS)
 generate:
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > ./ebpf/c/vmlinux.h
 	go generate -x ./...
+
+format:
+	find . -type f \( -name '*.[ch]' -and -not -name 'vmlinux.h' \) -exec clang-format -i {} \;
