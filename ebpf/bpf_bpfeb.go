@@ -12,14 +12,6 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-type bpfEvent struct {
-	Comm  [16]uint8
-	Sport uint16
-	Dport uint16
-	Saddr uint32
-	Daddr uint32
-}
-
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -63,7 +55,6 @@ type bpfSpecs struct {
 type bpfProgramSpecs struct {
 	TcpClose             *ebpf.ProgramSpec `ebpf:"tcp_close"`
 	TcpCloseExit         *ebpf.ProgramSpec `ebpf:"tcp_close_exit"`
-	TcpConnect           *ebpf.ProgramSpec `ebpf:"tcp_connect"`
 	TcpRecvmsgExit       *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_exit"`
 	TcpRetransmitSkb     *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb"`
 	TcpRetransmitSkbExit *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb_exit"`
@@ -77,7 +68,6 @@ type bpfMapSpecs struct {
 	ConnCloseEvent                *ebpf.MapSpec `ebpf:"conn_close_event"`
 	ConnStats                     *ebpf.MapSpec `ebpf:"conn_stats"`
 	ConnTupleToSocketSkbConnTuple *ebpf.MapSpec `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
-	Events                        *ebpf.MapSpec `ebpf:"events"`
 	PendingTcpRetransmitSkb       *ebpf.MapSpec `ebpf:"pending_tcp_retransmit_skb"`
 	PortBindings                  *ebpf.MapSpec `ebpf:"port_bindings"`
 	TcpOngoingConnectPid          *ebpf.MapSpec `ebpf:"tcp_ongoing_connect_pid"`
@@ -109,7 +99,6 @@ type bpfMaps struct {
 	ConnCloseEvent                *ebpf.Map `ebpf:"conn_close_event"`
 	ConnStats                     *ebpf.Map `ebpf:"conn_stats"`
 	ConnTupleToSocketSkbConnTuple *ebpf.Map `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
-	Events                        *ebpf.Map `ebpf:"events"`
 	PendingTcpRetransmitSkb       *ebpf.Map `ebpf:"pending_tcp_retransmit_skb"`
 	PortBindings                  *ebpf.Map `ebpf:"port_bindings"`
 	TcpOngoingConnectPid          *ebpf.Map `ebpf:"tcp_ongoing_connect_pid"`
@@ -124,7 +113,6 @@ func (m *bpfMaps) Close() error {
 		m.ConnCloseEvent,
 		m.ConnStats,
 		m.ConnTupleToSocketSkbConnTuple,
-		m.Events,
 		m.PendingTcpRetransmitSkb,
 		m.PortBindings,
 		m.TcpOngoingConnectPid,
@@ -140,7 +128,6 @@ func (m *bpfMaps) Close() error {
 type bpfPrograms struct {
 	TcpClose             *ebpf.Program `ebpf:"tcp_close"`
 	TcpCloseExit         *ebpf.Program `ebpf:"tcp_close_exit"`
-	TcpConnect           *ebpf.Program `ebpf:"tcp_connect"`
 	TcpRecvmsgExit       *ebpf.Program `ebpf:"tcp_recvmsg_exit"`
 	TcpRetransmitSkb     *ebpf.Program `ebpf:"tcp_retransmit_skb"`
 	TcpRetransmitSkbExit *ebpf.Program `ebpf:"tcp_retransmit_skb_exit"`
@@ -150,7 +137,6 @@ func (p *bpfPrograms) Close() error {
 	return _BpfClose(
 		p.TcpClose,
 		p.TcpCloseExit,
-		p.TcpConnect,
 		p.TcpRecvmsgExit,
 		p.TcpRetransmitSkb,
 		p.TcpRetransmitSkbExit,
