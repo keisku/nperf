@@ -115,7 +115,7 @@ BPF_HASH_MAP(tcp_stats, conn_tuple_t, tcp_stats_t, 1024)
 /*
  * Hash map to store conn_tuple_t to retransmits. We use a separate map
  * for retransmits from tcp_stats above since we don't normally
- * have the pid in the tcp_retransmit_skb kprobe
+ * have the pid in the tcp_retransmit_skb().
  */
 BPF_HASH_MAP(tcp_retransmits, conn_tuple_t, __u32, 1024)
 
@@ -125,7 +125,7 @@ BPF_HASH_MAP(tcp_ongoing_connect_pid, struct sock *, __u64, 1024)
 // We use this map as a container for batching closed tcp/udp connections
 BPF_PERCPU_HASH_MAP(conn_close_batch, __u32, batch_t, 1024)
 
-/* Similar to pending_sockets this is used for capturing state between the call and return of the tcp_retransmit_skb() system call.
+/* This is used for capturing state between the call and return of the tcp_retransmit_skb() system call.
  *
  * Keys: the PID returned by bpf_get_current_pid_tgid()
  * Values: the args of the tcp_retransmit_skb call being instrumented.
