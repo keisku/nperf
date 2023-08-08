@@ -33,14 +33,6 @@ typedef enum {
 
 typedef struct
 {
-    __u8 layer_api;
-    __u8 layer_application;
-    __u8 layer_encryption;
-    __u8 flags;
-} protocol_stack_t;
-
-typedef struct
-{
     __u64 sent_bytes;
     __u64 recv_bytes;
     __u64 timestamp;
@@ -57,7 +49,6 @@ typedef struct
     __u64 sent_packets;
     __u64 recv_packets;
     __u8 direction;
-    protocol_stack_t protocol_stack;
 } conn_stats_ts_t;
 
 // Connection flags
@@ -140,10 +131,6 @@ BPF_PERCPU_HASH_MAP(conn_close_batch, __u32, batch_t, 1024)
  * Values: the args of the tcp_retransmit_skb call being instrumented.
  */
 BPF_HASH_MAP(pending_tcp_retransmit_skb, __u64, tcp_retransmit_skb_args_t, 8192)
-
-// Maps a connection tuple to its classified protocol. Used to reduce redundant
-// classification procedures on the same connection
-BPF_HASH_MAP(connection_protocol, conn_tuple_t, protocol_stack_t, 1024)
 
 // Maps skb connection tuple to socket connection tuple.
 // On ingress, skb connection tuple is pre NAT, and socket connection tuple is post NAT, and on egress, the opposite.
@@ -342,72 +329,6 @@ static __always_inline conn_stats_ts_t *get_conn_stats(conn_tuple_t *t, struct s
     return bpf_map_lookup_elem(&conn_stats, t);
 }
 
-// is_fully_classified returns true if all layers are set or if
-// `mark_as_fully_classified` was previously called for this `stack`
-static __always_inline bool is_fully_classified(protocol_stack_t *stack) {
-    if (!stack) {
-        return false;
-    }
-
-    return stack->flags & FLAG_FULLY_CLASSIFIED ||
-           (stack->layer_api > 0 &&
-               stack->layer_application > 0 &&
-               stack->layer_encryption > 0);
-}
-
-static __always_inline void set_protocol_flag(protocol_stack_t *stack, u8 flag) {
-    if (!stack) {
-        return;
-    }
-
-    stack->flags |= flag;
-}
-
-// merge_protocol_stacks modifies `this` by merging it with `that`
-static __always_inline void merge_protocol_stacks(protocol_stack_t *this, protocol_stack_t *that) {
-    if (!this || !that) {
-        return;
-    }
-
-    if (!this->layer_api) {
-        this->layer_api = that->layer_api;
-    }
-    if (!this->layer_application) {
-        this->layer_application = that->layer_application;
-    }
-    if (!this->layer_encryption) {
-        this->layer_encryption = that->layer_encryption;
-    }
-
-    this->flags |= that->flags;
-}
-
-static __always_inline void update_protocol_classification_information(conn_tuple_t *t, conn_stats_ts_t *stats) {
-    if (is_fully_classified(&stats->protocol_stack)) {
-        return;
-    }
-
-    conn_tuple_t conn_tuple_copy = *t;
-    // The classifier is a socket filter and there we are not accessible for pid and netns.
-    // The key is based of the source & dest addresses and ports, and the metadata.
-    conn_tuple_copy.netns = 0;
-    conn_tuple_copy.pid = 0;
-
-    protocol_stack_t *protocol_stack = bpf_map_lookup_elem(&connection_protocol, &conn_tuple_copy);
-    set_protocol_flag(protocol_stack, FLAG_NPM_ENABLED);
-    merge_protocol_stacks(&stats->protocol_stack, protocol_stack);
-
-    conn_tuple_t *cached_skb_conn_tup_ptr = bpf_map_lookup_elem(&conn_tuple_to_socket_skb_conn_tuple, &conn_tuple_copy);
-    if (!cached_skb_conn_tup_ptr) {
-        return;
-    }
-
-    conn_tuple_copy = *cached_skb_conn_tup_ptr;
-    protocol_stack = bpf_map_lookup_elem(&connection_protocol, &conn_tuple_copy);
-    set_protocol_flag(protocol_stack, FLAG_NPM_ENABLED);
-    merge_protocol_stacks(&stats->protocol_stack, protocol_stack);
-}
-
 /**
  * Updates the connection state flags based on the number of bytes sent and received.
  */
@@ -456,8 +377,6 @@ static __always_inline void update_conn_stats(conn_tuple_t *t, size_t sent_bytes
     if (!val) {
         return;
     }
-
-    update_protocol_classification_information(t, val);
 
     // If already in our map, increment size in-place
     update_conn_state(t, val, sent_bytes, recv_bytes);

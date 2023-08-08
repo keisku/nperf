@@ -79,7 +79,6 @@ type bpfMapSpecs struct {
 	ConnCloseEvent                *ebpf.MapSpec `ebpf:"conn_close_event"`
 	ConnStats                     *ebpf.MapSpec `ebpf:"conn_stats"`
 	ConnTupleToSocketSkbConnTuple *ebpf.MapSpec `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
-	ConnectionProtocol            *ebpf.MapSpec `ebpf:"connection_protocol"`
 	Events                        *ebpf.MapSpec `ebpf:"events"`
 	PendingTcpRetransmitSkb       *ebpf.MapSpec `ebpf:"pending_tcp_retransmit_skb"`
 	PidFdBySock                   *ebpf.MapSpec `ebpf:"pid_fd_by_sock"`
@@ -115,7 +114,6 @@ type bpfMaps struct {
 	ConnCloseEvent                *ebpf.Map `ebpf:"conn_close_event"`
 	ConnStats                     *ebpf.Map `ebpf:"conn_stats"`
 	ConnTupleToSocketSkbConnTuple *ebpf.Map `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
-	ConnectionProtocol            *ebpf.Map `ebpf:"connection_protocol"`
 	Events                        *ebpf.Map `ebpf:"events"`
 	PendingTcpRetransmitSkb       *ebpf.Map `ebpf:"pending_tcp_retransmit_skb"`
 	PidFdBySock                   *ebpf.Map `ebpf:"pid_fd_by_sock"`
@@ -134,7 +132,6 @@ func (m *bpfMaps) Close() error {
 		m.ConnCloseEvent,
 		m.ConnStats,
 		m.ConnTupleToSocketSkbConnTuple,
-		m.ConnectionProtocol,
 		m.Events,
 		m.PendingTcpRetransmitSkb,
 		m.PidFdBySock,
