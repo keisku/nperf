@@ -64,16 +64,15 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	ConnCloseBatch                *ebpf.MapSpec `ebpf:"conn_close_batch"`
-	ConnCloseEvent                *ebpf.MapSpec `ebpf:"conn_close_event"`
-	ConnStats                     *ebpf.MapSpec `ebpf:"conn_stats"`
-	ConnTupleToSocketSkbConnTuple *ebpf.MapSpec `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
-	PendingTcpRetransmitSkb       *ebpf.MapSpec `ebpf:"pending_tcp_retransmit_skb"`
-	PortBindings                  *ebpf.MapSpec `ebpf:"port_bindings"`
-	TcpOngoingConnectPid          *ebpf.MapSpec `ebpf:"tcp_ongoing_connect_pid"`
-	TcpRetransmits                *ebpf.MapSpec `ebpf:"tcp_retransmits"`
-	TcpStats                      *ebpf.MapSpec `ebpf:"tcp_stats"`
-	UdpPortBindings               *ebpf.MapSpec `ebpf:"udp_port_bindings"`
+	ConnCloseBatch          *ebpf.MapSpec `ebpf:"conn_close_batch"`
+	ConnCloseEvent          *ebpf.MapSpec `ebpf:"conn_close_event"`
+	ConnStats               *ebpf.MapSpec `ebpf:"conn_stats"`
+	PendingTcpRetransmitSkb *ebpf.MapSpec `ebpf:"pending_tcp_retransmit_skb"`
+	PortBindings            *ebpf.MapSpec `ebpf:"port_bindings"`
+	TcpOngoingConnectPid    *ebpf.MapSpec `ebpf:"tcp_ongoing_connect_pid"`
+	TcpRetransmits          *ebpf.MapSpec `ebpf:"tcp_retransmits"`
+	TcpStats                *ebpf.MapSpec `ebpf:"tcp_stats"`
+	UdpPortBindings         *ebpf.MapSpec `ebpf:"udp_port_bindings"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -95,16 +94,15 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	ConnCloseBatch                *ebpf.Map `ebpf:"conn_close_batch"`
-	ConnCloseEvent                *ebpf.Map `ebpf:"conn_close_event"`
-	ConnStats                     *ebpf.Map `ebpf:"conn_stats"`
-	ConnTupleToSocketSkbConnTuple *ebpf.Map `ebpf:"conn_tuple_to_socket_skb_conn_tuple"`
-	PendingTcpRetransmitSkb       *ebpf.Map `ebpf:"pending_tcp_retransmit_skb"`
-	PortBindings                  *ebpf.Map `ebpf:"port_bindings"`
-	TcpOngoingConnectPid          *ebpf.Map `ebpf:"tcp_ongoing_connect_pid"`
-	TcpRetransmits                *ebpf.Map `ebpf:"tcp_retransmits"`
-	TcpStats                      *ebpf.Map `ebpf:"tcp_stats"`
-	UdpPortBindings               *ebpf.Map `ebpf:"udp_port_bindings"`
+	ConnCloseBatch          *ebpf.Map `ebpf:"conn_close_batch"`
+	ConnCloseEvent          *ebpf.Map `ebpf:"conn_close_event"`
+	ConnStats               *ebpf.Map `ebpf:"conn_stats"`
+	PendingTcpRetransmitSkb *ebpf.Map `ebpf:"pending_tcp_retransmit_skb"`
+	PortBindings            *ebpf.Map `ebpf:"port_bindings"`
+	TcpOngoingConnectPid    *ebpf.Map `ebpf:"tcp_ongoing_connect_pid"`
+	TcpRetransmits          *ebpf.Map `ebpf:"tcp_retransmits"`
+	TcpStats                *ebpf.Map `ebpf:"tcp_stats"`
+	UdpPortBindings         *ebpf.Map `ebpf:"udp_port_bindings"`
 }
 
 func (m *bpfMaps) Close() error {
@@ -112,7 +110,6 @@ func (m *bpfMaps) Close() error {
 		m.ConnCloseBatch,
 		m.ConnCloseEvent,
 		m.ConnStats,
-		m.ConnTupleToSocketSkbConnTuple,
 		m.PendingTcpRetransmitSkb,
 		m.PortBindings,
 		m.TcpOngoingConnectPid,
