@@ -106,18 +106,19 @@ func newTPacket() (*afpacket.TPacket, error) {
 
 // Run starts the Monitor until the context is canceled.
 func (m *Monitor) Run(ctx context.Context) {
-	m.pollPackets(ctx)
-	<-ctx.Done()
+	m.pollPackets(ctx) // blocking until the context is canceled
+	slog.Info("stop polling packets")
 	m.sourceTPacket.Close()
 	closeAllMetricChannels()
 }
 
+// pollPackets polls for incoming packets and processes them.
+// It blocks until the context is canceled.
 func (m *Monitor) pollPackets(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Millisecond)
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("stop polling packets")
 			return
 		case <-ticker.C:
 			data, captureInfo, err := m.sourceTPacket.ZeroCopyReadPacketData()
