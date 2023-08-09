@@ -3,7 +3,7 @@ CFLAGS := -O2 -g -Wall -Werror $(CFLAGS)
 
 .PHONY: all format generate build
 
-all: build
+all: generate format build
 
 build:
 	go mod tidy
