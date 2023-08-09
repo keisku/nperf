@@ -133,7 +133,7 @@ func initMeterProvider() (func(context.Context) error, error) {
 }
 
 func (o *Options) Run(ctx context.Context) error {
-	stopebpf, err := nperfebpf.Start()
+	stopebpf, err := nperfebpf.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start ebpf programs: %s", err)
 	}
