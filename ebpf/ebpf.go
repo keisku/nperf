@@ -10,7 +10,7 @@ import (
 )
 
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -no-global-types bpf ./c/bpf_prog.c -- -I./c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -no-global-types -type conn_tuple_t -type conn_stats_ts_t bpf ./c/bpf_prog.c -- -I./c
 
 var objs bpfObjects
 
@@ -48,6 +48,14 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 	}
 	go func() {
 		metricsCollectionTicker := time.NewTicker(time.Second)
+		var connTuple bpfConnTupleT
+		var connStats bpfConnStatsTsT
+		// connsByTuple is used to detect whether we are iterating over
+		// a connection we have previously seen. This can happen when
+		// ebpf maps are being iterated over and deleted at the same time.
+		// The iteration can reset when that happens.
+		// See https://justin.azoff.dev/blog/bpf_map_get_next_key-pitfalls/
+		connsByTuple := make(map[bpfConnTupleT]struct{})
 		for {
 			select {
 			case <-ctx.Done():
@@ -62,7 +70,17 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 				}
 				return
 			case <-metricsCollectionTicker.C:
-				// TODO: iterate ebpf maps to collect metrics
+				connStatsIter := objs.ConnStats.Iterate()
+				for connStatsIter.Next(&connTuple, &connStats) {
+					if _, ok := connsByTuple[connTuple]; ok {
+						slog.Warn("duplicate connTuple", slog.Any("connTuple", connTuple))
+						continue
+					}
+					slog.Info("conn_tuple and conn_stats", slog.Any("connTuple", connTuple), slog.Any("connStats", connStats))
+				}
+				if err := connStatsIter.Err(); err != nil {
+					slog.Warn("can't iterate over connStats", slog.Any("error", err))
+				}
 			}
 		}
 	}()

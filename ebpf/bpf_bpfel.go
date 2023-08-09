@@ -12,6 +12,30 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type bpfConnStatsTsT struct {
+	SentBytes   uint64
+	RecvBytes   uint64
+	Timestamp   uint64
+	Flags       uint32
+	Cookie      uint32
+	SentPackets uint64
+	RecvPackets uint64
+	Direction   uint8
+	_           [7]byte
+}
+
+type bpfConnTupleT struct {
+	SaddrH   uint64
+	SaddrL   uint64
+	DaddrH   uint64
+	DaddrL   uint64
+	Sport    uint16
+	Dport    uint16
+	Netns    uint32
+	Pid      uint32
+	Metadata uint32
+}
+
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
