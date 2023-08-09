@@ -66,6 +66,8 @@ type bpfProgramSpecs struct {
 	TcpRecvmsgExit       *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_exit"`
 	TcpRetransmitSkb     *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb"`
 	TcpRetransmitSkbExit *ebpf.ProgramSpec `ebpf:"tcp_retransmit_skb_exit"`
+	TcpSendmsgExit       *ebpf.ProgramSpec `ebpf:"tcp_sendmsg_exit"`
+	TcpSendpageExit      *ebpf.ProgramSpec `ebpf:"tcp_sendpage_exit"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
@@ -147,6 +149,8 @@ type bpfPrograms struct {
 	TcpRecvmsgExit       *ebpf.Program `ebpf:"tcp_recvmsg_exit"`
 	TcpRetransmitSkb     *ebpf.Program `ebpf:"tcp_retransmit_skb"`
 	TcpRetransmitSkbExit *ebpf.Program `ebpf:"tcp_retransmit_skb_exit"`
+	TcpSendmsgExit       *ebpf.Program `ebpf:"tcp_sendmsg_exit"`
+	TcpSendpageExit      *ebpf.Program `ebpf:"tcp_sendpage_exit"`
 }
 
 func (p *bpfPrograms) Close() error {
@@ -164,6 +168,8 @@ func (p *bpfPrograms) Close() error {
 		p.TcpRecvmsgExit,
 		p.TcpRetransmitSkb,
 		p.TcpRetransmitSkbExit,
+		p.TcpSendmsgExit,
+		p.TcpSendpageExit,
 	)
 }
 

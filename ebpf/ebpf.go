@@ -18,6 +18,8 @@ func Start() (func(), error) {
 		return nil, fmt.Errorf("can't load bpf: %w", err)
 	}
 	linkTracingOptions := []link.TracingOptions{
+		{Program: objs.TcpSendmsgExit},
+		{Program: objs.TcpSendpageExit},
 		{Program: objs.TcpClose},
 		{Program: objs.TcpCloseExit},
 		{Program: objs.TcpRecvmsgExit},

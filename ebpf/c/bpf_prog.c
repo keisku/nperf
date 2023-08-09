@@ -10,6 +10,56 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+SEC("fexit/tcp_sendmsg")
+int BPF_PROG(tcp_sendmsg_exit, struct sock *sk, struct msghdr *msg, size_t size, int sent) {
+    bpf_printk("fexit/tcp_sendmsg");
+    if (sent < 0) {
+        bpf_printk("fexit/tcp_sendmsg: tcp_sendmsg err=%d\n", sent);
+        return 0;
+    }
+
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    bpf_printk("fexit/tcp_sendmsg: pid_tgid: %d, sent: %d, sock: %llx\n", pid_tgid, sent, sk);
+
+    conn_tuple_t t = {};
+    if (!read_conn_tuple(&t, sk, pid_tgid, CONN_TYPE_TCP)) {
+        return 0;
+    }
+
+    handle_tcp_stats(&t, sk, 0);
+
+    __u32 packets_in = 0;
+    __u32 packets_out = 0;
+    get_tcp_segment_counts(sk, &packets_in, &packets_out);
+
+    return handle_message(&t, sent, 0, CONN_DIRECTION_UNKNOWN, packets_out, packets_in, PACKET_COUNT_ABSOLUTE, sk);
+}
+
+SEC("fexit/tcp_sendpage")
+int BPF_PROG(tcp_sendpage_exit, struct sock *sk, struct page *page, int offset, size_t size, int flags, int sent) {
+    bpf_printk("fexit/tcp_sendpage");
+    if (sent < 0) {
+        bpf_printk("fexit/tcp_sendpage: err=%d\n", sent);
+        return 0;
+    }
+
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    bpf_printk("fexit/tcp_sendpage: pid_tgid: %d, sent: %d, sock: %llx\n", pid_tgid, sent, sk);
+
+    conn_tuple_t t = {};
+    if (!read_conn_tuple(&t, sk, pid_tgid, CONN_TYPE_TCP)) {
+        return 0;
+    }
+
+    handle_tcp_stats(&t, sk, 0);
+
+    __u32 packets_in = 0;
+    __u32 packets_out = 0;
+    get_tcp_segment_counts(sk, &packets_in, &packets_out);
+
+    return handle_message(&t, sent, 0, CONN_DIRECTION_UNKNOWN, packets_out, packets_in, PACKET_COUNT_ABSOLUTE, sk);
+}
+
 SEC("fentry/tcp_close")
 int BPF_PROG(tcp_close, struct sock *sk, long timeout) {
     conn_tuple_t t = {};
