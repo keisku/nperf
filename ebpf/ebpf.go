@@ -15,46 +15,6 @@ import (
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -no-global-types -type conn_tuple_t -type conn_stats_ts_t -type tcp_stats_t bpf ./c/bpf_prog.c -- -I./c
 
-type connDirection uint8
-
-const (
-	connDirectionUnknown  connDirection = 0b00
-	connDirectionIncoming connDirection = 0b01
-	connDirectionOutgoing connDirection = 0b10
-)
-
-func (d connDirection) String() string {
-	switch d {
-	case connDirectionIncoming:
-		return "incoming"
-	case connDirectionOutgoing:
-		return "outgoing"
-	default:
-		return "unknown"
-	}
-}
-
-type connFlag uint8
-
-const (
-	connFlagLInit   connFlag = 1 << 0 // initial/first message sent
-	connFlagRInit   connFlag = 1 << 1 // reply received for initial message from remote
-	connFlagAssured connFlag = 1 << 2 // "3-way handshake" complete, i.e. response to initial reply sent
-)
-
-func (f connFlag) String() string {
-	switch f {
-	case connFlagLInit:
-		return "linit"
-	case connFlagRInit:
-		return "rinit"
-	case connFlagAssured:
-		return "assured"
-	default:
-		return "unknown"
-	}
-}
-
 var objs bpfObjects
 
 // Start starts the eBPF program by loading the BPF objects and attaching tracing to the specified programs.
@@ -132,8 +92,6 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 						{Key: "dport", Value: attribute.Int64Value(int64(connTuple.Dport))},
 						{Key: "netns", Value: attribute.Int64Value(int64(connTuple.Netns))},
 						{Key: "pid", Value: attribute.Int64Value(int64(connTuple.Pid))},
-						{Key: "conn_direction", Value: attribute.StringValue(connDirection(connStats.Direction).String())},
-						{Key: "conn_flag", Value: attribute.StringValue(connFlag(connStats.Flags).String())},
 					}
 					sendDatapoint[float64](tcpSentBytesCh, datapoint[float64]{value: float64(connStats.SentBytes) / 1000, attributes: attrs})
 					sendDatapoint[float64](tcpRecvBytesCh, datapoint[float64]{value: float64(connStats.RecvBytes) / 1000, attributes: attrs})
