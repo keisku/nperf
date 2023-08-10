@@ -60,10 +60,25 @@ typedef enum {
 
 typedef struct
 {
+    /* rtt represents the Smoothed Round Trip Time for a TCP connection in microseconds.
+     * It is fetched from the srtt_us field in struct tcp_sock.
+     * The value is an exponentially weighted moving average of the RTT samples,
+     * giving more weight to recent samples. It is crucial for various TCP algorithms,
+     * especially for calculating the retransmission timeout (RTO).
+     */
     __u32 rtt;
+
+    /* rtt_var represents the variability or fluctuation in the RTT samples in microseconds.
+     * It is derived from the mdev_us field in struct tcp_sock, which stands for "Mean Deviation".
+     * This value measures the absolute deviation of the RTT samples from the smoothed RTT.
+     * A higher rtt_var indicates that the RTT samples are more variable, affecting the RTO calculation.
+     */
     __u32 rtt_var;
 
-    // Bit mask containing all TCP state transitions tracked by our tracer
+    /* state_transitions is a bit mask containing all TCP state transitions
+     * tracked by the tracer. Each bit in this mask represents a specific TCP state transition.
+     * It helps in monitoring and diagnosing the behavior of TCP connections.
+     */
     __u16 state_transitions;
 } tcp_stats_t;
 

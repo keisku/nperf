@@ -13,6 +13,7 @@ import (
 
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/keisku/nperf/dns"
+	"github.com/keisku/nperf/ebpf"
 	nperfebpf "github.com/keisku/nperf/ebpf"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -58,10 +59,7 @@ func (o *Options) Validate() error {
 type encoder struct{}
 
 // TODO: This is a temporary implementation.
-// - Support other metric types.
 // - Support flitering by metric name.
-// - Support other output locations.
-// - Consider better output format.
 func (encoder) Encode(v any) error {
 	resourceMetrics, ok := v.(*metricdata.ResourceMetrics)
 	if !ok {
@@ -73,14 +71,11 @@ func (encoder) Encode(v any) error {
 			switch v := m.Data.(type) {
 			case metricdata.Gauge[int64]:
 				for _, dp := range v.DataPoints {
-					fmt.Printf("%s - %s | %d %s | %s | %v\n",
-						m.Name,
-						m.Description,
-						dp.Value,
-						m.Unit,
-						dp.Time,
-						getAttrs(dp.Attributes),
-					)
+					slog.Info(m.Name, slog.Int64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", getAttrs(dp.Attributes)))
+				}
+			case metricdata.Gauge[float64]:
+				for _, dp := range v.DataPoints {
+					slog.Info(m.Name, slog.Float64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", getAttrs(dp.Attributes)))
 				}
 			}
 		}
@@ -122,7 +117,8 @@ func initMeterProvider() (func(context.Context) error, error) {
 	}
 	meterProvider := metric.NewMeterProvider(
 		metric.WithReader(reader),
-		metric.WithReader(metric.NewPeriodicReader(stdoutExporter, metric.WithInterval(time.Second))),
+		// Every 100ms, write metrics to io.Writer of slog.
+		metric.WithReader(metric.NewPeriodicReader(stdoutExporter, metric.WithInterval(100*time.Millisecond))),
 		metric.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
 			semconv.ServiceNameKey.String("nperf"),
@@ -133,13 +129,21 @@ func initMeterProvider() (func(context.Context) error, error) {
 }
 
 func (o *Options) Run(ctx context.Context) error {
-	stopebpf, err := nperfebpf.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to start ebpf programs: %s", err)
-	}
 	shutdownMeterProvider, err := initMeterProvider()
 	if err != nil {
 		return fmt.Errorf("failed to create meter provider: %s", err)
+	}
+
+	// eBPF
+	if err := ebpf.ConfigureMetricMeter(otel.GetMeterProvider().Meter(
+		"nperf.ebpf",
+		otelmetric.WithInstrumentationVersion(version),
+	)); err != nil {
+		return fmt.Errorf("failed to set metric meter of ebpf: %s", err)
+	}
+	stopebpf, err := nperfebpf.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start ebpf programs: %s", err)
 	}
 
 	// DNS

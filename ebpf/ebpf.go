@@ -6,11 +6,54 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf/link"
+	utilnetip "github.com/keisku/nperf/util/netip"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 )
 
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -no-global-types -type conn_tuple_t -type conn_stats_ts_t bpf ./c/bpf_prog.c -- -I./c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -no-global-types -type conn_tuple_t -type conn_stats_ts_t -type tcp_stats_t bpf ./c/bpf_prog.c -- -I./c
+
+type connDirection uint8
+
+const (
+	connDirectionUnknown  connDirection = 0b00
+	connDirectionIncoming connDirection = 0b01
+	connDirectionOutgoing connDirection = 0b10
+)
+
+func (d connDirection) String() string {
+	switch d {
+	case connDirectionIncoming:
+		return "incoming"
+	case connDirectionOutgoing:
+		return "outgoing"
+	default:
+		return "unknown"
+	}
+}
+
+type connFlag uint8
+
+const (
+	connFlagLInit   connFlag = 1 << 0 // initial/first message sent
+	connFlagRInit   connFlag = 1 << 1 // reply received for initial message from remote
+	connFlagAssured connFlag = 1 << 2 // "3-way handshake" complete, i.e. response to initial reply sent
+)
+
+func (f connFlag) String() string {
+	switch f {
+	case connFlagLInit:
+		return "linit"
+	case connFlagRInit:
+		return "rinit"
+	case connFlagAssured:
+		return "assured"
+	default:
+		return "unknown"
+	}
+}
 
 var objs bpfObjects
 
@@ -47,16 +90,17 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 		}
 	}
 	go func() {
-		metricsCollectionTicker := time.NewTicker(time.Second)
+		metricsCollectionTicker := time.NewTicker(300 * time.Millisecond)
 		var connTuple bpfConnTupleT
 		var connStats bpfConnStatsTsT
-		// connsByTuple is used to detect whether we are iterating over
-		// a connection we have previously seen. This can happen when
-		// ebpf maps are being iterated over and deleted at the same time.
-		// The iteration can reset when that happens.
-		// See https://justin.azoff.dev/blog/bpf_map_get_next_key-pitfalls/
-		connsByTuple := make(map[bpfConnTupleT]struct{})
+		var tcpStats bpfTcpStatsT
 		for {
+			// connsByTuple is used to detect whether we are iterating over
+			// a connection we have previously seen. This can happen when
+			// ebpf maps are being iterated over and deleted at the same time.
+			// The iteration can reset when that happens.
+			// See https://justin.azoff.dev/blog/bpf_map_get_next_key-pitfalls/
+			connsByTuple := make(map[bpfConnTupleT]struct{})
 			select {
 			case <-ctx.Done():
 				slog.Info("exiting ebpf programs...")
@@ -73,10 +117,32 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 				connStatsIter := objs.ConnStats.Iterate()
 				for connStatsIter.Next(&connTuple, &connStats) {
 					if _, ok := connsByTuple[connTuple]; ok {
-						slog.Warn("duplicate connTuple", slog.Any("connTuple", connTuple))
+						slog.Debug("duplicate connTuple", slog.Any("conn_tuple", connTuple))
 						continue
 					}
-					slog.Info("conn_tuple and conn_stats", slog.Any("connTuple", connTuple), slog.Any("connStats", connStats))
+					connsByTuple[connTuple] = struct{}{}
+					if err := objs.TcpStats.Lookup(&connTuple, &tcpStats); err != nil {
+						slog.Warn("can't lookup tcpStats", slog.Any("error", err), slog.Any("conn_tuple", connTuple))
+						continue
+					}
+					attrs := []attribute.KeyValue{
+						{Key: "saddr", Value: attribute.StringValue(utilnetip.FromLowHigh(connTuple.SaddrL, connTuple.SaddrH).String())},
+						{Key: "daddr", Value: attribute.StringValue(utilnetip.FromLowHigh(connTuple.DaddrL, connTuple.DaddrH).String())},
+						{Key: "sport", Value: attribute.Int64Value(int64(connTuple.Sport))},
+						{Key: "dport", Value: attribute.Int64Value(int64(connTuple.Dport))},
+						{Key: "netns", Value: attribute.Int64Value(int64(connTuple.Netns))},
+						{Key: "pid", Value: attribute.Int64Value(int64(connTuple.Pid))},
+						{Key: "conn_direction", Value: attribute.StringValue(connDirection(connStats.Direction).String())},
+						{Key: "conn_flag", Value: attribute.StringValue(connFlag(connStats.Flags).String())},
+					}
+					sendDatapoint[float64](tcpSentBytesCh, datapoint[float64]{value: float64(connStats.SentBytes) / 1000, attributes: attrs})
+					sendDatapoint[float64](tcpRecvBytesCh, datapoint[float64]{value: float64(connStats.RecvBytes) / 1000, attributes: attrs})
+					sendDatapoint[float64](tcpRttCh, datapoint[float64]{value: float64(tcpStats.Rtt) / 1000, attributes: attrs})
+					tcpRttHistgram.Record(ctx, float64(tcpStats.Rtt)/1000, metric.WithAttributes(attrs...))
+					sendDatapoint[float64](tcpRttVarCh, datapoint[float64]{value: float64(tcpStats.RttVar) / 1000, attributes: attrs})
+					tcpRttVarHistgram.Record(ctx, float64(tcpStats.RttVar)/1000, metric.WithAttributes(attrs...))
+					sendDatapoint[int64](tcpSentPacketsCh, datapoint[int64]{value: int64(connStats.SentPackets), attributes: attrs})
+					sendDatapoint[int64](tcpRecvPacketsCh, datapoint[int64]{value: int64(connStats.RecvPackets), attributes: attrs})
 				}
 				if err := connStatsIter.Err(); err != nil {
 					slog.Warn("can't iterate over connStats", slog.Any("error", err))

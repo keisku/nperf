@@ -36,6 +36,13 @@ type bpfConnTupleT struct {
 	Metadata uint32
 }
 
+type bpfTcpStatsT struct {
+	Rtt              uint32
+	RttVar           uint32
+	StateTransitions uint16
+	_                [2]byte
+}
+
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
