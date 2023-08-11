@@ -20,22 +20,22 @@ var (
 	tcpRttVarHistgram metric.Float64Histogram       = noop.Float64Histogram{}
 )
 
+const datapointChannelSize = 100
+
 var (
-	tcpSentBytesCh   = make(chan datapoint[float64], 100)
-	tcpRecvBytesCh   = make(chan datapoint[float64], 100)
-	tcpSentPacketsCh = make(chan datapoint[int64], 100)
-	tcpRecvPacketsCh = make(chan datapoint[int64], 100)
-	tcpRttCh         = make(chan datapoint[float64], 100)
-	tcpRttVarCh      = make(chan datapoint[float64], 100)
+	tcpSentBytesCh   = make(chan datapoint[float64], datapointChannelSize)
+	tcpRecvBytesCh   = make(chan datapoint[float64], datapointChannelSize)
+	tcpSentPacketsCh = make(chan datapoint[int64], datapointChannelSize)
+	tcpRecvPacketsCh = make(chan datapoint[int64], datapointChannelSize)
+	tcpRttCh         = make(chan datapoint[float64], datapointChannelSize)
+	tcpRttVarCh      = make(chan datapoint[float64], datapointChannelSize)
 )
 
 func ConfigureMetricMeter(m metric.Meter) error {
 	const (
-		tcpRttName = "nperf_tcp_rtt"
 		tcpRttDesc = `Smoothed Round Trip Time is the exponentially weighted moving average of RTT samples,
 reflecting the average time for a packet's round trip in a TCP connection. 
 It's vital for TCP algorithms, particularly the retransmission timeout (RTO) calculation.`
-		tcpRttVarName = "nperf_tcp_mean_deviation_rtt"
 		tcpRttVarDesc = `The variability or fluctuation in the RTT samples.
 The mean deviation is used in conjunction with the smoothed RTT to calculate the RTO.
 A higher mean deviation indicates that the RTT samples are more variable.`
@@ -81,7 +81,7 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 		return err
 	}
 	if tcpRtt, err = m.Float64ObservableGauge(
-		tcpRttName,
+		"tcp_rtt",
 		metric.WithDescription(tcpRttDesc),
 		metric.WithUnit("ms"),
 	); err != nil {
@@ -91,13 +91,13 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 		return err
 	}
 	if tcpRttHistgram, err = m.Float64Histogram(
-		tcpRttName,
+		"nperf_tcp_rtt",
 		metric.WithDescription(tcpRttDesc),
 	); err != nil {
 		return err
 	}
 	if tcpRttVar, err = m.Float64ObservableGauge(
-		tcpRttVarName,
+		"tcp_mean_deviation_rtt",
 		metric.WithDescription(tcpRttVarDesc),
 		metric.WithUnit("ms"),
 	); err != nil {
@@ -107,7 +107,7 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 		return err
 	}
 	if tcpRttVarHistgram, err = m.Float64Histogram(
-		tcpRttVarName,
+		"nperf_tcp_mean_deviation_rtt",
 		metric.WithDescription(tcpRttVarDesc),
 	); err != nil {
 		return err
