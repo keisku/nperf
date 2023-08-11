@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf/link"
+	nperfmetric "github.com/keisku/nperf/metric"
 	utilnetip "github.com/keisku/nperf/util/netip"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -85,22 +86,24 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 						slog.Warn("can't lookup tcpStats", slog.Any("error", err), slog.Any("conn_tuple", connTuple))
 						continue
 					}
+					saddr := utilnetip.FromLowHigh(connTuple.SaddrL, connTuple.SaddrH)
+					daddr := utilnetip.FromLowHigh(connTuple.DaddrL, connTuple.DaddrH)
 					attrs := []attribute.KeyValue{
-						{Key: "saddr", Value: attribute.StringValue(utilnetip.FromLowHigh(connTuple.SaddrL, connTuple.SaddrH).String())},
-						{Key: "daddr", Value: attribute.StringValue(utilnetip.FromLowHigh(connTuple.DaddrL, connTuple.DaddrH).String())},
+						{Key: "saddr", Value: attribute.StringValue(saddr.String())},
+						{Key: "daddr", Value: attribute.StringValue(daddr.String())},
 						{Key: "sport", Value: attribute.Int64Value(int64(connTuple.Sport))},
 						{Key: "dport", Value: attribute.Int64Value(int64(connTuple.Dport))},
 						{Key: "netns", Value: attribute.Int64Value(int64(connTuple.Netns))},
 						{Key: "pid", Value: attribute.Int64Value(int64(connTuple.Pid))},
 					}
-					sendDatapoint[float64](tcpSentBytesCh, datapoint[float64]{value: float64(connStats.SentBytes) / 1000, attributes: attrs})
-					sendDatapoint[float64](tcpRecvBytesCh, datapoint[float64]{value: float64(connStats.RecvBytes) / 1000, attributes: attrs})
-					sendDatapoint[float64](tcpRttCh, datapoint[float64]{value: float64(tcpStats.Rtt) / 1000, attributes: attrs})
+					nperfmetric.SendDatapoint[float64](tcpSentBytesCh, nperfmetric.Datapoint[float64]{Value: float64(connStats.SentBytes) / 1000, Attributes: attrs})
+					nperfmetric.SendDatapoint[float64](tcpRecvBytesCh, nperfmetric.Datapoint[float64]{Value: float64(connStats.RecvBytes) / 1000, Attributes: attrs})
+					nperfmetric.SendDatapoint[float64](tcpRttCh, nperfmetric.Datapoint[float64]{Value: float64(tcpStats.Rtt) / 1000, Attributes: attrs})
 					tcpRttHistgram.Record(ctx, float64(tcpStats.Rtt)/1000, metric.WithAttributes(attrs...))
-					sendDatapoint[float64](tcpRttVarCh, datapoint[float64]{value: float64(tcpStats.RttVar) / 1000, attributes: attrs})
+					nperfmetric.SendDatapoint[float64](tcpRttVarCh, nperfmetric.Datapoint[float64]{Value: float64(tcpStats.RttVar) / 1000, Attributes: attrs})
 					tcpRttVarHistgram.Record(ctx, float64(tcpStats.RttVar)/1000, metric.WithAttributes(attrs...))
-					sendDatapoint[int64](tcpSentPacketsCh, datapoint[int64]{value: int64(connStats.SentPackets), attributes: attrs})
-					sendDatapoint[int64](tcpRecvPacketsCh, datapoint[int64]{value: int64(connStats.RecvPackets), attributes: attrs})
+					nperfmetric.SendDatapoint[int64](tcpSentPacketsCh, nperfmetric.Datapoint[int64]{Value: int64(connStats.SentPackets), Attributes: attrs})
+					nperfmetric.SendDatapoint[int64](tcpRecvPacketsCh, nperfmetric.Datapoint[int64]{Value: int64(connStats.RecvPackets), Attributes: attrs})
 				}
 				if err := connStatsIter.Err(); err != nil {
 					slog.Warn("can't iterate over connStats", slog.Any("error", err))

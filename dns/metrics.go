@@ -3,7 +3,7 @@ package dns
 import (
 	"context"
 
-	"go.opentelemetry.io/otel/attribute"
+	nperfmetric "github.com/keisku/nperf/metric"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
 	"golang.org/x/exp/slog"
@@ -26,7 +26,7 @@ var (
 // Need to set the size of the channel to avoid blocking the sender.
 // No intention of this number. Change it if we need.
 var (
-	queryLatencyGaugeCh    = make(chan datapoint[float64], 5)
+	queryLatencyGaugeCh    = make(chan nperfmetric.Datapoint[float64], 5)
 	closeAllMetricChannels = func() {
 		close(queryLatencyGaugeCh)
 		slog.Debug("all metric channels are closed")
@@ -82,7 +82,7 @@ func ConfigureMetricMeter(m metric.Meter) error {
 		for {
 			select {
 			case dp := <-queryLatencyGaugeCh:
-				o.ObserveFloat64(queryLatencyGauge, dp.value, metric.WithAttributes(dp.attributes...))
+				o.ObserveFloat64(queryLatencyGauge, dp.Value, metric.WithAttributes(dp.Attributes...))
 			default:
 				// To avoid blocking the callback.
 				return nil
@@ -92,9 +92,4 @@ func ConfigureMetricMeter(m metric.Meter) error {
 		return err
 	}
 	return nil
-}
-
-type datapoint[N int64 | float64] struct {
-	value      N
-	attributes []attribute.KeyValue
 }

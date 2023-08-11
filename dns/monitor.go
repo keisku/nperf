@@ -3,12 +3,12 @@ package dns
 import (
 	"context"
 	"fmt"
-	"net/netip"
 	"syscall"
 	"time"
 
 	"github.com/google/gopacket/afpacket"
 	"github.com/google/gopacket/layers"
+	nperfmetric "github.com/keisku/nperf/metric"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
@@ -68,7 +68,7 @@ func (m *Monitor) recordQueryStats(payload Payload, capturedAt time.Time) error 
 	latency := float64(capturedAt.Sub(queryStats.packetCapturedAt)) / float64(time.Millisecond)
 	queryLatency.Record(context.Background(), latency, metric.WithAttributes(metricAttrs...))
 	select {
-	case queryLatencyGaugeCh <- datapoint[float64]{value: latency, attributes: metricAttrs}:
+	case queryLatencyGaugeCh <- nperfmetric.Datapoint[float64]{Value: latency, Attributes: metricAttrs}:
 	default:
 		slog.Warn("failed to send a datapoint to the channel")
 	}

@@ -1,12 +1,9 @@
 package ebpf
 
 import (
-	"context"
-
-	"go.opentelemetry.io/otel/attribute"
+	nperfmetric "github.com/keisku/nperf/metric"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
-	"golang.org/x/exp/slog"
 )
 
 var (
@@ -23,12 +20,12 @@ var (
 const datapointChannelSize = 100
 
 var (
-	tcpSentBytesCh   = make(chan datapoint[float64], datapointChannelSize)
-	tcpRecvBytesCh   = make(chan datapoint[float64], datapointChannelSize)
-	tcpSentPacketsCh = make(chan datapoint[int64], datapointChannelSize)
-	tcpRecvPacketsCh = make(chan datapoint[int64], datapointChannelSize)
-	tcpRttCh         = make(chan datapoint[float64], datapointChannelSize)
-	tcpRttVarCh      = make(chan datapoint[float64], datapointChannelSize)
+	tcpSentBytesCh   = make(chan nperfmetric.Datapoint[float64], datapointChannelSize)
+	tcpRecvBytesCh   = make(chan nperfmetric.Datapoint[float64], datapointChannelSize)
+	tcpSentPacketsCh = make(chan nperfmetric.Datapoint[int64], datapointChannelSize)
+	tcpRecvPacketsCh = make(chan nperfmetric.Datapoint[int64], datapointChannelSize)
+	tcpRttCh         = make(chan nperfmetric.Datapoint[float64], datapointChannelSize)
+	tcpRttVarCh      = make(chan nperfmetric.Datapoint[float64], datapointChannelSize)
 )
 
 func ConfigureMetricMeter(m metric.Meter) error {
@@ -49,7 +46,7 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 	); err != nil {
 		return err
 	}
-	if err = registerFloat64(m, tcpSentBytesCh, tcpSentBytes); err != nil {
+	if err = nperfmetric.RegisterFloat64(m, tcpSentBytesCh, tcpSentBytes); err != nil {
 		return err
 	}
 	if tcpRecvBytes, err = m.Float64ObservableGauge(
@@ -59,7 +56,7 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 	); err != nil {
 		return err
 	}
-	if err = registerFloat64(m, tcpRecvBytesCh, tcpRecvBytes); err != nil {
+	if err = nperfmetric.RegisterFloat64(m, tcpRecvBytesCh, tcpRecvBytes); err != nil {
 		return err
 	}
 	if tcpSentPackets, err = m.Int64ObservableGauge(
@@ -68,7 +65,7 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 	); err != nil {
 		return err
 	}
-	if err = registerInt64(m, tcpSentPacketsCh, tcpSentPackets); err != nil {
+	if err = nperfmetric.RegisterInt64(m, tcpSentPacketsCh, tcpSentPackets); err != nil {
 		return err
 	}
 	if tcpRecvPackets, err = m.Int64ObservableGauge(
@@ -77,7 +74,7 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 	); err != nil {
 		return err
 	}
-	if err = registerInt64(m, tcpRecvPacketsCh, tcpRecvPackets); err != nil {
+	if err = nperfmetric.RegisterInt64(m, tcpRecvPacketsCh, tcpRecvPackets); err != nil {
 		return err
 	}
 	if tcpRtt, err = m.Float64ObservableGauge(
@@ -87,7 +84,7 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 	); err != nil {
 		return err
 	}
-	if err = registerFloat64(m, tcpRttCh, tcpRtt); err != nil {
+	if err = nperfmetric.RegisterFloat64(m, tcpRttCh, tcpRtt); err != nil {
 		return err
 	}
 	if tcpRttHistgram, err = m.Float64Histogram(
@@ -103,7 +100,7 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 	); err != nil {
 		return err
 	}
-	if err = registerFloat64(m, tcpRttVarCh, tcpRttVar); err != nil {
+	if err = nperfmetric.RegisterFloat64(m, tcpRttVarCh, tcpRttVar); err != nil {
 		return err
 	}
 	if tcpRttVarHistgram, err = m.Float64Histogram(
@@ -113,47 +110,4 @@ A higher mean deviation indicates that the RTT samples are more variable.`
 		return err
 	}
 	return nil
-}
-
-func registerFloat64(m metric.Meter, ch chan datapoint[float64], obs metric.Float64ObservableGauge) error {
-	_, err := m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
-		for {
-			select {
-			case dp := <-ch:
-				o.ObserveFloat64(obs, dp.value, metric.WithAttributes(dp.attributes...))
-			default:
-				// To avoid blocking the callback.
-				return nil
-			}
-		}
-	}, obs)
-	return err
-}
-
-func registerInt64(m metric.Meter, ch chan datapoint[int64], obs metric.Int64ObservableGauge) error {
-	_, err := m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
-		for {
-			select {
-			case dp := <-ch:
-				o.ObserveInt64(obs, dp.value, metric.WithAttributes(dp.attributes...))
-			default:
-				// To avoid blocking the callback.
-				return nil
-			}
-		}
-	}, obs)
-	return err
-}
-
-type datapoint[N int64 | float64] struct {
-	value      N
-	attributes []attribute.KeyValue
-}
-
-func sendDatapoint[N int64 | float64](ch chan<- datapoint[N], dp datapoint[N]) {
-	select {
-	case ch <- dp:
-	default:
-		slog.Warn("can't send a datapoint")
-	}
 }
