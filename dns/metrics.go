@@ -11,22 +11,22 @@ import (
 
 // metrics
 var (
-	pollPacketEAGAIN        metric.Int64Counter         = noop.Int64Counter{}
-	pollPacketTimeout       metric.Int64Counter         = noop.Int64Counter{}
-	pollPacketError         metric.Int64Counter         = noop.Int64Counter{}
-	parseDNSLayerError      metric.Int64Counter         = noop.Int64Counter{}
-	parseIPLayerError       metric.Int64Counter         = noop.Int64Counter{}
-	responseFailure         metric.Int64Counter         = noop.Int64Counter{}
-	noCorrespondingResponse metric.Int64Counter         = noop.Int64Counter{}
-	queryLatency            metric.Int64Histogram       = noop.Int64Histogram{}
-	queryLatencyGauge       metric.Int64ObservableGauge = noop.Int64ObservableGauge{}
+	pollPacketEAGAIN        metric.Int64Counter           = noop.Int64Counter{}
+	pollPacketTimeout       metric.Int64Counter           = noop.Int64Counter{}
+	pollPacketError         metric.Int64Counter           = noop.Int64Counter{}
+	parseDNSLayerSkip       metric.Int64Counter           = noop.Int64Counter{}
+	parseIPLayerError       metric.Int64Counter           = noop.Int64Counter{}
+	responseFailure         metric.Int64Counter           = noop.Int64Counter{}
+	noCorrespondingResponse metric.Int64Counter           = noop.Int64Counter{}
+	queryLatency            metric.Float64Histogram       = noop.Float64Histogram{}
+	queryLatencyGauge       metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
 )
 
 // channels to send datapoints
 // Need to set the size of the channel to avoid blocking the sender.
 // No intention of this number. Change it if we need.
 var (
-	queryLatencyGaugeCh    = make(chan datapoint[int64], 10)
+	queryLatencyGaugeCh    = make(chan datapoint[float64], 5)
 	closeAllMetricChannels = func() {
 		close(queryLatencyGaugeCh)
 		slog.Debug("all metric channels are closed")
@@ -46,7 +46,7 @@ func ConfigureMetricMeter(m metric.Meter) error {
 	if pollPacketError, err = m.Int64Counter("nperf_dns_poll_packet_error"); err != nil {
 		return err
 	}
-	if parseDNSLayerError, err = m.Int64Counter("nperf_dns_process_dns_layer_error"); err != nil {
+	if parseDNSLayerSkip, err = m.Int64Counter("nperf_dns_process_dns_layer_skip"); err != nil {
 		return err
 	}
 	if parseIPLayerError, err = m.Int64Counter("nperf_dns_process_ip_layer_error"); err != nil {
@@ -64,17 +64,17 @@ func ConfigureMetricMeter(m metric.Meter) error {
 	); err != nil {
 		return err
 	}
-	if queryLatency, err = m.Int64Histogram(
+	if queryLatency, err = m.Float64Histogram(
 		"nperf_dns_query_latency",
 		metric.WithDescription("The latency of a DNS query."),
-		metric.WithUnit("microseconds"),
+		metric.WithUnit("ms"),
 	); err != nil {
 		return err
 	}
-	if queryLatencyGauge, err = m.Int64ObservableGauge(
-		"nperf_dns_query_latency",
+	if queryLatencyGauge, err = m.Float64ObservableGauge(
+		"dns_query_latency",
 		metric.WithDescription("The latency of a DNS query."),
-		metric.WithUnit("microseconds"),
+		metric.WithUnit("ms"),
 	); err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func ConfigureMetricMeter(m metric.Meter) error {
 		for {
 			select {
 			case dp := <-queryLatencyGaugeCh:
-				o.ObserveInt64(queryLatencyGauge, dp.value, metric.WithAttributes(dp.attributes...))
+				o.ObserveFloat64(queryLatencyGauge, dp.value, metric.WithAttributes(dp.attributes...))
 			default:
 				// To avoid blocking the callback.
 				return nil

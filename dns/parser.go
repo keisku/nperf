@@ -15,31 +15,6 @@ import (
 	"golang.org/x/exp/slog"
 )
 
-// packetType tells us whether the packet is a query or a reply (successful/failed)
-type packetType uint8
-
-const (
-	// successfulResponse means the packet contains a DNS response and the response code is 0 (no error)
-	packetTypeSuccessfulResponse packetType = iota
-	// failedResponse means the packet contains a DNS response and the response code is not 0
-	packetTypeFailedResponse
-	// query means the packet contains a DNS query
-	packetTypeQuery
-)
-
-func (t packetType) String() string {
-	switch t {
-	case packetTypeSuccessfulResponse:
-		return "successful_response"
-	case packetTypeFailedResponse:
-		return "failed_response"
-	case packetTypeQuery:
-		return "query"
-	default:
-		return "unknown"
-	}
-}
-
 var (
 	errTruncated      = errors.New("the packet is truncated")
 	errSkippedPayload = errors.New("the packet does not contain relevant DNS response")
@@ -120,7 +95,7 @@ func newParser(queryTypes []string) *parser {
 	}
 }
 
-func (p *parser) parse(data []byte, packet *Packet) error {
+func (p *parser) parse(data []byte, payload *Payload) error {
 	err := p.decoder.DecodeLayers(data, &p.layers)
 	if p.decoder.Truncated {
 		return errTruncated
@@ -132,16 +107,23 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 	if p.layers[len(p.layers)-1] != layers.LayerTypeDNS {
 		return errSkippedPayload
 	}
-	if err := p.parseAnswer(p.dnsPayload, packet); err != nil {
-		if err != errSkippedPayload {
-			parseDNSLayerError.Add(context.Background(), 1, metric.WithAttributes(attribute.String("error", err.Error())))
-		}
-		return fmt.Errorf("parsing DNS answer: %s", err)
+	if len(p.dnsPayload.Questions) != 1 {
+		parseDNSLayerSkip.Add(context.Background(), 1)
+		return errSkippedPayload
 	}
+	question := p.dnsPayload.Questions[0]
+	if question.Class != layers.DNSClassIN || !p.wantQueryType(question.Type) {
+		parseDNSLayerSkip.Add(context.Background(), 1)
+		return errSkippedPayload
+	}
+	if p.dnsPayload.ResponseCode != layers.DNSResponseCodeNoErr {
+		responseFailure.Add(context.Background(), 1, metric.WithAttributes(attribute.String("response_code", p.dnsPayload.ResponseCode.String())))
+	}
+	payload.DNS = p.dnsPayload
 	for _, layer := range p.layers {
 		switch layer {
 		case layers.LayerTypeIPv4:
-			if err := p.parseIpAddr(packet, p.ipv4Payload); err != nil {
+			if err := p.parseIpAddr(payload, p.ipv4Payload); err != nil {
 				parseIPLayerError.Add(context.Background(), 1, metric.WithAttributes(
 					attribute.String("error", err.Error()),
 					attribute.Int("ip_version", 4),
@@ -149,7 +131,7 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 				slog.Warn("failed to parse IPv4 addresses", "error", err)
 			}
 		case layers.LayerTypeIPv6:
-			if err := p.parseIpAddr(packet, p.ipv6Payload); err != nil {
+			if err := p.parseIpAddr(payload, p.ipv6Payload); err != nil {
 				parseIPLayerError.Add(context.Background(), 1, metric.WithAttributes(
 					attribute.String("error", err.Error()),
 					attribute.Int("ip_version", 6),
@@ -157,28 +139,25 @@ func (p *parser) parse(data []byte, packet *Packet) error {
 				slog.Warn("failed to parse IPv6 addresses", "error", err)
 			}
 		case layers.LayerTypeUDP:
-			if packet.typ == packetTypeQuery {
-				packet.key.clientPort = uint16(p.udpPayload.SrcPort)
+			if payload.QR {
+				payload.connection.clientPort = uint16(p.udpPayload.DstPort)
 			} else {
-				packet.key.clientPort = uint16(p.udpPayload.DstPort)
+				payload.connection.clientPort = uint16(p.udpPayload.SrcPort)
 			}
-			packet.key.protocol = syscall.IPPROTO_UDP
+			payload.connection.protocol = syscall.IPPROTO_UDP
 		case layers.LayerTypeTCP:
-			if packet.typ == packetTypeQuery {
-				packet.key.clientPort = uint16(p.udpPayload.SrcPort)
+			if payload.QR {
+				payload.connection.clientPort = uint16(p.tcpPayload.DstPort)
 			} else {
-				packet.key.clientPort = uint16(p.udpPayload.DstPort)
+				payload.connection.clientPort = uint16(p.tcpPayload.SrcPort)
 			}
-			packet.key.protocol = syscall.IPPROTO_TCP
+			payload.connection.protocol = syscall.IPPROTO_TCP
 		}
 	}
-	packet.transactionID = p.dnsPayload.ID
 	return nil
 }
 
-// parseIpAddr parses the IP address from the layer.
-// This is used to extract the IP address from the layer for further processing.
-func (*parser) parseIpAddr(packet *Packet, layer gopacket.DecodingLayer) error {
+func (*parser) parseIpAddr(payload *Payload, layer gopacket.DecodingLayer) error {
 	var rawSrcIp, rawDstIp []byte
 	switch l := layer.(type) {
 	case *layers.IPv4:
@@ -198,12 +177,12 @@ func (*parser) parseIpAddr(packet *Packet, layer gopacket.DecodingLayer) error {
 	if !ok {
 		return fmt.Errorf("parse destination IP address: %s", rawDstIp)
 	}
-	if packet.typ == packetTypeQuery {
-		packet.key.clientIP = srcIp
-		packet.key.serverIP = dstIp
+	if payload.QR {
+		payload.connection.clientIP = dstIp
+		payload.connection.serverIP = srcIp
 	} else {
-		packet.key.clientIP = dstIp
-		packet.key.serverIP = srcIp
+		payload.connection.clientIP = srcIp
+		payload.connection.serverIP = dstIp
 	}
 	return nil
 }
@@ -211,32 +190,4 @@ func (*parser) parseIpAddr(packet *Packet, layer gopacket.DecodingLayer) error {
 func (p *parser) wantQueryType(checktype layers.DNSType) bool {
 	_, ok := p.recodedQueryTypes[checktype]
 	return ok
-}
-
-// parseAnswer parses the answer from the DNS layer.
-// This is used to extract the answer from the DNS layer for further processing.
-func (p *parser) parseAnswer(dns *layers.DNS, packet *Packet) error {
-	// Only consider singleton, A-record questions
-	if len(dns.Questions) != 1 {
-		return errSkippedPayload
-	}
-	question := dns.Questions[0]
-	if question.Class != layers.DNSClassIN || !p.wantQueryType(question.Type) {
-		return errSkippedPayload
-	}
-	if !dns.QR {
-		packet.typ = packetTypeQuery
-		packet.queryType = question.Type
-		packet.question = hostnameFromBytes(question.Name)
-		return nil
-	}
-	packet.responseCode = dns.ResponseCode
-	if dns.ResponseCode != 0 {
-		responseFailure.Add(context.Background(), 1, metric.WithAttributes(attribute.String("response_code", dns.ResponseCode.String())))
-		packet.typ = packetTypeFailedResponse
-		return nil
-	}
-	packet.queryType = question.Type
-	packet.typ = packetTypeSuccessfulResponse
-	return nil
 }

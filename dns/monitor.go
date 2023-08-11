@@ -3,12 +3,12 @@ package dns
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"syscall"
 	"time"
 
 	"github.com/google/gopacket/afpacket"
 	"github.com/google/gopacket/layers"
-	timeutil "github.com/keisku/nperf/util/time"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
@@ -21,56 +21,54 @@ type Monitor struct {
 }
 
 type queryStatsKey struct {
-	key           Key
+	connection    Connection
 	transactionId uint16
 }
 
 type queryStatsValue struct {
-	packetCapturedAt int64
-	question         string
-	queryType        layers.DNSType
+	packetCapturedAt time.Time
+	questions        []layers.DNSQuestion
 }
 
 func (v queryStatsValue) Attributes() []attribute.KeyValue {
-	return []attribute.KeyValue{
+	var attrs []attribute.KeyValue
+	for i, q := range v.questions {
 		// NOTE:
 		// - Don't add the packetCapturedAt to the attributes because it's high cardinality.
-		attribute.String("question", v.question),
-		attribute.String("query_type", v.queryType.String()),
+		attrs = append(attrs, attribute.String(fmt.Sprintf("question_%d", i), string(q.Name)))
+		attrs = append(attrs, attribute.String(fmt.Sprintf("query_type_%d", i), q.Type.String()))
 	}
+	return attrs
 }
 
-func (m *Monitor) recordQueryStats(packet Packet) error {
+func (m *Monitor) recordQueryStats(payload Payload, capturedAt time.Time) error {
 	queryStatsKey := queryStatsKey{
-		key:           packet.key,
-		transactionId: packet.transactionID,
+		connection:    payload.connection,
+		transactionId: payload.ID,
 	}
-
-	if packet.typ == packetTypeQuery {
+	if !payload.QR {
 		if _, ok := m.queryStats[queryStatsKey]; !ok {
 			m.queryStats[queryStatsKey] = queryStatsValue{
-				packetCapturedAt: timeutil.MicroSeconds(packet.capturedAt),
-				question:         packet.question.Get(),
-				queryType:        packet.queryType,
+				packetCapturedAt: capturedAt,
+				questions:        payload.Questions,
 			}
 		}
 		return nil
 	}
-
-	metricAttrs := append(m.queryStats[queryStatsKey].Attributes(), packet.Attributes()...)
-
 	queryStats, ok := m.queryStats[queryStatsKey]
 	if !ok {
-		noCorrespondingResponse.Add(context.Background(), 1, metric.WithAttributes(metricAttrs...))
-		return fmt.Errorf("no corresponding query entry for a response: %#v", packet.key)
+		noCorrespondingResponse.Add(context.Background(), 1, metric.WithAttributes(payload.Attributes()...))
+		return fmt.Errorf("no corresponding query entry for a response: %#v", payload.connection)
 	}
+
+	metricAttrs := append(queryStats.Attributes(), payload.Attributes()...)
 
 	delete(m.queryStats, queryStatsKey)
 
-	latency := timeutil.MicroSeconds(packet.capturedAt) - queryStats.packetCapturedAt
+	latency := float64(capturedAt.Sub(queryStats.packetCapturedAt)) / float64(time.Millisecond)
 	queryLatency.Record(context.Background(), latency, metric.WithAttributes(metricAttrs...))
 	select {
-	case queryLatencyGaugeCh <- datapoint[int64]{value: latency, attributes: metricAttrs}:
+	case queryLatencyGaugeCh <- datapoint[float64]{value: latency, attributes: metricAttrs}:
 	default:
 		slog.Warn("failed to send a datapoint to the channel")
 	}
@@ -150,13 +148,11 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 
 // processPacket retrieves DNS information from the received packet data.
 func (m *Monitor) processPacket(data []byte, packetCapturedAt time.Time) error {
-	packet := Packet{
-		capturedAt: packetCapturedAt,
-	}
-	if err := m.parser.parse(data, &packet); err != nil {
+	var payload Payload
+	if err := m.parser.parse(data, &payload); err != nil {
 		return fmt.Errorf("parse a DNS packet: %s", err)
 	}
-	if err := m.recordQueryStats(packet); err != nil {
+	if err := m.recordQueryStats(payload, packetCapturedAt); err != nil {
 		return fmt.Errorf("record DNS statistics: %s", err)
 	}
 	return nil
