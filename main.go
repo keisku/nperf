@@ -145,7 +145,7 @@ func (o *Options) Run(ctx context.Context) error {
 	go dnsMonitor.Run(ctx)
 
 	// eBPF
-	stopebpf, err := nperfebpf.Start(ctx)
+	stopebpf, err := nperfebpf.Start(ctx, dnsMonitor)
 	if err != nil {
 		return fmt.Errorf("failed to start ebpf programs: %s", err)
 	}

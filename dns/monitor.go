@@ -3,6 +3,8 @@ package dns
 import (
 	"context"
 	"fmt"
+	"net/netip"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,6 +19,12 @@ type Monitor struct {
 	sourceTPacket *afpacket.TPacket
 	parser        *parser
 	queryStats    map[queryStatsKey]queryStatsValue
+	answers       sync.Map // key: netip.Addr, value: answer
+}
+
+type answer struct {
+	Name      string
+	ExpiredAt time.Time
 }
 
 type queryStatsKey struct {
@@ -106,12 +114,27 @@ func (m *Monitor) Run(ctx context.Context) {
 // pollPackets polls for incoming packets and processes them.
 // It blocks until the context is canceled.
 func (m *Monitor) pollPackets(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Millisecond)
+	pollPacketInterval := time.NewTicker(5 * time.Millisecond)
+	clearExpiredAnswerInterval := time.NewTicker(5 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-clearExpiredAnswerInterval.C:
+			// To prevent memory leak, delete expired answers.
+			m.answers.Range(func(k, v any) bool {
+				answer, ok := v.(answer)
+				if !ok {
+					slog.Warn("delete an unexpected type of answer", attribute.String("type", fmt.Sprintf("%T", v)))
+					m.answers.Delete(k)
+					return true
+				}
+				if answer.ExpiredAt.Before(time.Now()) {
+					m.answers.Delete(k)
+				}
+				return true
+			})
+		case <-pollPacketInterval.C:
 			data, captureInfo, err := m.sourceTPacket.ZeroCopyReadPacketData()
 
 			// This is the error code returned when an operation on a non-blocking socket cannot be completed immediately.
@@ -132,7 +155,7 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 				continue
 			}
 
-			if err := m.processPacket(data, captureInfo.Timestamp); err != nil {
+			if err := m.processPacket(ctx, data, captureInfo.Timestamp); err != nil {
 				slog.Debug(fmt.Sprintf("retrieve DNS information form a received packet: %s", err))
 			}
 		}
@@ -140,13 +163,59 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 }
 
 // processPacket retrieves DNS information from the received packet data.
-func (m *Monitor) processPacket(data []byte, packetCapturedAt time.Time) error {
+func (m *Monitor) processPacket(ctx context.Context, data []byte, packetCapturedAt time.Time) error {
 	var payload Payload
 	if err := m.parser.parse(data, &payload); err != nil {
 		return fmt.Errorf("parse a DNS packet: %s", err)
 	}
+	m.storeDomains(ctx, payload)
 	if err := m.recordQueryStats(payload, packetCapturedAt); err != nil {
 		return fmt.Errorf("record DNS statistics: %s", err)
 	}
 	return nil
+}
+
+func (m *Monitor) storeDomains(ctx context.Context, payload Payload) {
+	for _, ans := range payload.Answers {
+		ipAddr, ok := netip.AddrFromSlice(ans.IP)
+		if !ok {
+			continue
+		}
+		ttl := time.Duration(ans.TTL) * time.Second
+		m.answers.Store(ipAddr, answer{
+			Name:      string(ans.Name),
+			ExpiredAt: time.Now().Add(ttl), // Update the expiration time
+		})
+	}
+}
+
+// ReverseResolve returns a map of IP addresses to domain names.
+func (m *Monitor) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, error) {
+	domains := make(map[netip.Addr]string, len(addrs))
+	for _, addr := range addrs {
+		v, ok := m.answers.Load(addr)
+		if !ok {
+			continue
+		}
+		answer, ok := v.(answer)
+		if !ok {
+			slog.Warn("delete an unexpected type of answer", attribute.String("type", fmt.Sprintf("%T", v)))
+			m.answers.Delete(addr)
+			continue
+		}
+		if answer.ExpiredAt.Before(time.Now()) {
+			slog.Debug("delete an expired resolved answer",
+				attribute.String("name", answer.Name),
+				attribute.String("ip_addr", addr.String()),
+				attribute.String("expired_at", answer.ExpiredAt.String()))
+			m.answers.Delete(addr)
+			continue
+		}
+		domains[addr] = answer.Name
+
+	}
+	if len(domains) == 0 {
+		return nil, fmt.Errorf("domains associsted with the given addresses are not found: %v", addrs)
+	}
+	return domains, nil
 }

@@ -3,6 +3,7 @@ package ebpf
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/cilium/ebpf/link"
@@ -15,11 +16,24 @@ import (
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -no-global-types -type conn_tuple_t -type conn_stats_ts_t -type tcp_stats_t bpf ./c/bpf_prog.c -- -I./c
 
+type DNS interface {
+	ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, error)
+}
+
+type noopDNS struct{}
+
+func (noopDNS) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, error) {
+	return nil, nil
+}
+
 var objs bpfObjects
 
 // Start starts the eBPF program by loading the BPF objects and attaching tracing to the specified programs.
 // It returns an error if it fails to load the BPF objects or attach tracing.
-func Start(inCtx context.Context) (context.CancelFunc, error) {
+func Start(inCtx context.Context, dns DNS) (context.CancelFunc, error) {
+	if dns == nil {
+		dns = noopDNS{}
+	}
 	ctx, cancel := context.WithCancel(inCtx)
 	err := loadBpfObjects(&objs, nil)
 	if err != nil {
@@ -91,6 +105,16 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 						{Key: "dport", Value: attribute.Int64Value(int64(connTuple.Dport))},
 						{Key: "netns", Value: attribute.Int64Value(int64(connTuple.Netns))},
 						{Key: "pid", Value: attribute.Int64Value(int64(connTuple.Pid))},
+					}
+					domains, err := dns.ReverseResolve([]netip.Addr{saddr, daddr})
+					if err != nil {
+						slog.Debug(err.Error(), slog.String("saddr", saddr.String()), slog.String("daddr", daddr.String()))
+					}
+					if domain, ok := domains[saddr]; ok {
+						attrs = append(attrs, attribute.KeyValue{Key: "saddr_domain", Value: attribute.StringValue(domain)})
+					}
+					if domain, ok := domains[daddr]; ok {
+						attrs = append(attrs, attribute.KeyValue{Key: "daddr_domain", Value: attribute.StringValue(domain)})
 					}
 					metric.Gauge(metric.TCPSentBytes, float64(connStats.SentBytes)/1000, attrs...)
 					metric.Gauge(metric.TCPRecvBytes, float64(connStats.RecvBytes)/1000, attrs...)
