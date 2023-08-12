@@ -13,15 +13,14 @@ import (
 
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/keisku/nperf/dns"
-	"github.com/keisku/nperf/ebpf"
 	nperfebpf "github.com/keisku/nperf/ebpf"
+	nperfmetric "github.com/keisku/nperf/metric"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
-	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -133,17 +132,9 @@ func (o *Options) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create meter provider: %s", err)
 	}
-
-	// eBPF
-	if err := ebpf.ConfigureMetricMeter(otel.GetMeterProvider().Meter(
-		"nperf.ebpf",
-		otelmetric.WithInstrumentationVersion(version),
-	)); err != nil {
-		return fmt.Errorf("failed to set metric meter of ebpf: %s", err)
-	}
-	stopebpf, err := nperfebpf.Start(ctx)
+	closeMetricMeter, err := nperfmetric.ConfigureMetricMeter(otel.GetMeterProvider().Meter("nperf"))
 	if err != nil {
-		return fmt.Errorf("failed to start ebpf programs: %s", err)
+		return fmt.Errorf("failed to configure metric meter: %s", err)
 	}
 
 	// DNS
@@ -151,13 +142,13 @@ func (o *Options) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create DNS Monitor: %s", err)
 	}
-	if err := dns.ConfigureMetricMeter(otel.GetMeterProvider().Meter(
-		"nperf.dns",
-		otelmetric.WithInstrumentationVersion(version),
-	)); err != nil {
-		return fmt.Errorf("failed to set metric meter of dns: %s", err)
-	}
 	go dnsMonitor.Run(ctx)
+
+	// eBPF
+	stopebpf, err := nperfebpf.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start ebpf programs: %s", err)
+	}
 
 	// HTTP server
 	mux := http.NewServeMux()
@@ -177,6 +168,7 @@ func (o *Options) Run(ctx context.Context) error {
 			slog.Warn("failed to shutdown meter provider", slog.Any("error", err))
 		}
 		stopebpf()
+		closeMetricMeter()
 		close(stopCh)
 	}()
 	select {

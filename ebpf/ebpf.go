@@ -6,10 +6,9 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf/link"
-	nperfmetric "github.com/keisku/nperf/metric"
+	"github.com/keisku/nperf/metric"
 	utilnetip "github.com/keisku/nperf/util/netip"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 )
 
@@ -96,14 +95,12 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 						{Key: "netns", Value: attribute.Int64Value(int64(connTuple.Netns))},
 						{Key: "pid", Value: attribute.Int64Value(int64(connTuple.Pid))},
 					}
-					nperfmetric.SendDatapoint[float64](tcpSentBytesCh, nperfmetric.Datapoint[float64]{Value: float64(connStats.SentBytes) / 1000, Attributes: attrs})
-					nperfmetric.SendDatapoint[float64](tcpRecvBytesCh, nperfmetric.Datapoint[float64]{Value: float64(connStats.RecvBytes) / 1000, Attributes: attrs})
-					nperfmetric.SendDatapoint[float64](tcpRttCh, nperfmetric.Datapoint[float64]{Value: float64(tcpStats.Rtt) / 1000, Attributes: attrs})
-					tcpRttHistgram.Record(ctx, float64(tcpStats.Rtt)/1000, metric.WithAttributes(attrs...))
-					nperfmetric.SendDatapoint[float64](tcpRttVarCh, nperfmetric.Datapoint[float64]{Value: float64(tcpStats.RttVar) / 1000, Attributes: attrs})
-					tcpRttVarHistgram.Record(ctx, float64(tcpStats.RttVar)/1000, metric.WithAttributes(attrs...))
-					nperfmetric.SendDatapoint[int64](tcpSentPacketsCh, nperfmetric.Datapoint[int64]{Value: int64(connStats.SentPackets), Attributes: attrs})
-					nperfmetric.SendDatapoint[int64](tcpRecvPacketsCh, nperfmetric.Datapoint[int64]{Value: int64(connStats.RecvPackets), Attributes: attrs})
+					metric.Gauge(metric.TCPSentBytes, float64(connStats.SentBytes)/1000, attrs...)
+					metric.Gauge(metric.TCPRecvBytes, float64(connStats.RecvBytes)/1000, attrs...)
+					metric.Gauge(metric.TCPSentPackets, float64(connStats.SentPackets), attrs...)
+					metric.Gauge(metric.TCPRecvPackets, float64(connStats.RecvPackets), attrs...)
+					metric.Gauge(metric.TCPRtt, float64(tcpStats.Rtt)/1000, attrs...)
+					metric.Gauge(metric.TCPRttVar, float64(tcpStats.RttVar)/1000, attrs...)
 				}
 				if err := connStatsIter.Err(); err != nil {
 					slog.Warn("can't iterate over connStats", slog.Any("error", err))

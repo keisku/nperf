@@ -1,7 +1,6 @@
 package dns
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -10,8 +9,8 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/keisku/nperf/metric"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 )
 
@@ -108,34 +107,34 @@ func (p *parser) parse(data []byte, payload *Payload) error {
 		return errSkippedPayload
 	}
 	if len(p.dnsPayload.Questions) != 1 {
-		parseDNSLayerSkip.Add(context.Background(), 1)
+		metric.Inc(metric.DNSParseDNSLayerSkip)
 		return errSkippedPayload
 	}
 	question := p.dnsPayload.Questions[0]
 	if question.Class != layers.DNSClassIN || !p.wantQueryType(question.Type) {
-		parseDNSLayerSkip.Add(context.Background(), 1)
+		metric.Inc(metric.DNSParseDNSLayerSkip)
 		return errSkippedPayload
 	}
 	if p.dnsPayload.ResponseCode != layers.DNSResponseCodeNoErr {
-		responseFailure.Add(context.Background(), 1, metric.WithAttributes(attribute.String("response_code", p.dnsPayload.ResponseCode.String())))
+		metric.Inc(metric.DNSResponseFailure, attribute.String("response_code", p.dnsPayload.ResponseCode.String()))
 	}
 	payload.DNS = p.dnsPayload
 	for _, layer := range p.layers {
 		switch layer {
 		case layers.LayerTypeIPv4:
 			if err := p.parseIpAddr(payload, p.ipv4Payload); err != nil {
-				parseIPLayerError.Add(context.Background(), 1, metric.WithAttributes(
+				metric.Inc(metric.DNSParseIPLayerError, []attribute.KeyValue{
 					attribute.String("error", err.Error()),
 					attribute.Int("ip_version", 4),
-				))
+				}...)
 				slog.Warn("failed to parse IPv4 addresses", "error", err)
 			}
 		case layers.LayerTypeIPv6:
 			if err := p.parseIpAddr(payload, p.ipv6Payload); err != nil {
-				parseIPLayerError.Add(context.Background(), 1, metric.WithAttributes(
+				metric.Inc(metric.DNSParseIPLayerError, []attribute.KeyValue{
 					attribute.String("error", err.Error()),
 					attribute.Int("ip_version", 6),
-				))
+				}...)
 				slog.Warn("failed to parse IPv6 addresses", "error", err)
 			}
 		case layers.LayerTypeUDP:

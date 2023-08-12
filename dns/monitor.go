@@ -8,9 +8,8 @@ import (
 
 	"github.com/google/gopacket/afpacket"
 	"github.com/google/gopacket/layers"
-	nperfmetric "github.com/keisku/nperf/metric"
+	"github.com/keisku/nperf/metric"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 )
 
@@ -57,7 +56,7 @@ func (m *Monitor) recordQueryStats(payload Payload, capturedAt time.Time) error 
 	}
 	queryStats, ok := m.queryStats[queryStatsKey]
 	if !ok {
-		noCorrespondingResponse.Add(context.Background(), 1, metric.WithAttributes(payload.Attributes()...))
+		metric.Inc(metric.DNSNoCorrespondingResponse, payload.Attributes()...)
 		return fmt.Errorf("no corresponding query entry for a response: %#v", payload.connection)
 	}
 
@@ -66,12 +65,7 @@ func (m *Monitor) recordQueryStats(payload Payload, capturedAt time.Time) error 
 	delete(m.queryStats, queryStatsKey)
 
 	latency := float64(capturedAt.Sub(queryStats.packetCapturedAt)) / float64(time.Millisecond)
-	queryLatency.Record(context.Background(), latency, metric.WithAttributes(metricAttrs...))
-	select {
-	case queryLatencyGaugeCh <- nperfmetric.Datapoint[float64]{Value: latency, Attributes: metricAttrs}:
-	default:
-		slog.Warn("failed to send a datapoint to the channel")
-	}
+	metric.Gauge(metric.DNSQueryLatency, latency, metricAttrs...)
 	return nil
 }
 
@@ -107,7 +101,6 @@ func (m *Monitor) Run(ctx context.Context) {
 	m.pollPackets(ctx) // blocking until the context is canceled
 	slog.Info("stop polling packets")
 	m.sourceTPacket.Close()
-	closeAllMetricChannels()
 }
 
 // pollPackets polls for incoming packets and processes them.
@@ -125,16 +118,16 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 			// It tells the program that the operation would have caused the process to be suspended,
 			// and the process should try the operation again later.
 			if err == syscall.EAGAIN {
-				pollPacketEAGAIN.Add(ctx, 1)
+				metric.Inc(metric.DNSPollPacketEAGAIN)
 				continue
 			}
 			if err == afpacket.ErrTimeout {
-				pollPacketTimeout.Add(ctx, 1)
+				metric.Inc(metric.DNSPollPacketTimeout)
 				slog.Debug("timeout while reading a packet")
 				continue
 			}
 			if err != nil {
-				pollPacketError.Add(ctx, 1, metric.WithAttributes(attribute.String("error", err.Error())))
+				metric.Inc(metric.DNSPollPacketError, attribute.String("error", err.Error()))
 				slog.Warn("read a packet", err)
 				continue
 			}
