@@ -34,18 +34,20 @@ type queryStatsKey struct {
 
 type queryStatsValue struct {
 	packetCapturedAt time.Time
-	questions        []layers.DNSQuestion
+	question         layers.DNSQuestion
+}
+
+func convertDNSQuestionToAttributes(question layers.DNSQuestion) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("question", string(question.Name)),
+		attribute.String("query_type", question.Type.String()),
+		attribute.String("query_class", question.Class.String()),
+	}
 }
 
 func (v queryStatsValue) Attributes() []attribute.KeyValue {
-	var attrs []attribute.KeyValue
-	for i, q := range v.questions {
-		// NOTE:
-		// - Don't add the packetCapturedAt to the attributes because it's high cardinality.
-		attrs = append(attrs, attribute.String(fmt.Sprintf("question_%d", i), string(q.Name)))
-		attrs = append(attrs, attribute.String(fmt.Sprintf("query_type_%d", i), q.Type.String()))
-	}
-	return attrs
+	// Don't add the packetCapturedAt to the attributes because it's high cardinality.
+	return convertDNSQuestionToAttributes(v.question)
 }
 
 func (m *Monitor) recordQueryStats(payload Payload, capturedAt time.Time) error {
@@ -53,18 +55,30 @@ func (m *Monitor) recordQueryStats(payload Payload, capturedAt time.Time) error 
 		connection:    payload.connection,
 		transactionId: payload.ID,
 	}
+	var question layers.DNSQuestion
+	if 1 <= len(payload.Questions) {
+		question = payload.Questions[0]
+		if 0 < len(payload.Questions[1:]) {
+			slog.Warn("discard the second and subsequent questions", slog.Any("discard_questions", payload.Questions[1:]))
+			for _, q := range payload.Questions[1:] {
+				metric.Inc(metric.DNSDiscardQuestion, append(payload.Attributes(), convertDNSQuestionToAttributes(q)...)...)
+			}
+		}
+	}
 	if !payload.QR {
 		if _, ok := m.queryStats[queryStatsKey]; !ok {
-			m.queryStats[queryStatsKey] = queryStatsValue{
-				packetCapturedAt: capturedAt,
-				questions:        payload.Questions,
+			if 1 <= len(payload.Questions) {
+				m.queryStats[queryStatsKey] = queryStatsValue{
+					packetCapturedAt: capturedAt,
+					question:         question,
+				}
 			}
 		}
 		return nil
 	}
 	queryStats, ok := m.queryStats[queryStatsKey]
 	if !ok {
-		metric.Inc(metric.DNSNoCorrespondingResponse, payload.Attributes()...)
+		metric.Inc(metric.DNSNoCorrespondingResponse, append(payload.Attributes(), convertDNSQuestionToAttributes(question)...)...)
 		return fmt.Errorf("no corresponding query entry for a response: %#v", payload.connection)
 	}
 

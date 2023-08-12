@@ -27,6 +27,7 @@ const (
 	DNSResponseFailure
 	DNSNoCorrespondingResponse
 	DNSQueryLatency
+	DNSDiscardQuestion
 
 	// TCP
 	TCPSentBytes
@@ -49,6 +50,7 @@ func (n Name) String() string {
 		"nperf_dns_response_failure",
 		"nperf_dns_no_corresponding_response",
 		"nperf_dns_query_latency",
+		"nperf_dns_discard_question",
 		"nperf_tcp_sent_bytes",
 		"nperf_tcp_recv_bytes",
 		"nperf_tcp_sent_packets",
@@ -69,6 +71,7 @@ func (n Name) instrumentOptions() [2]metric.InstrumentOption {
 		DNSResponseFailure:         {metric.WithUnit(""), metric.WithDescription("A DNS response code is not successful.")},
 		DNSNoCorrespondingResponse: {metric.WithUnit(""), metric.WithDescription("No corresponding response for a DNS query. It means that we cannot record the latency of the DNS query.")},
 		DNSQueryLatency:            {metric.WithUnit("ms"), metric.WithDescription("The latency of a DNS query.")},
+		DNSDiscardQuestion:         {metric.WithUnit(""), metric.WithDescription("Discard a DNS question.")},
 		TCPSentBytes:               {metric.WithUnit("kb"), metric.WithDescription("The number of kilobytes sent.")},
 		TCPRecvBytes:               {metric.WithUnit("kb"), metric.WithDescription("The number of kilobytes received.")},
 		TCPSentPackets:             {metric.WithUnit("packets"), metric.WithDescription("The number of packets sent.")},
@@ -93,6 +96,7 @@ var (
 	dnsResponseFailure         metric.Int64Counter           = noop.Int64Counter{}
 	dnsNoCorrespondingResponse metric.Int64Counter           = noop.Int64Counter{}
 	dnsQueryLatency            metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
+	dnsDiscardQuestion         metric.Int64Counter           = noop.Int64Counter{}
 	tcpSentBytes               metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
 	tcpRecvBytes               metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
 	tcpSentPackets             metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
@@ -110,6 +114,7 @@ var int64CounterMetrics = map[Name]metric.Int64Counter{
 	DNSParseIPLayerError:       dnsParseIPLayerError,
 	DNSResponseFailure:         dnsResponseFailure,
 	DNSNoCorrespondingResponse: dnsNoCorrespondingResponse,
+	DNSDiscardQuestion:         dnsDiscardQuestion,
 }
 
 var float64ObservableGaugeMetrics = map[Name]metric.Float64ObservableGauge{
