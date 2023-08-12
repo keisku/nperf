@@ -117,7 +117,7 @@ func initMeterProvider() (func(context.Context) error, error) {
 	meterProvider := metric.NewMeterProvider(
 		metric.WithReader(reader),
 		// Every 100ms, write metrics to io.Writer of slog.
-		metric.WithReader(metric.NewPeriodicReader(stdoutExporter, metric.WithInterval(100*time.Millisecond))),
+		metric.WithReader(metric.NewPeriodicReader(stdoutExporter, metric.WithInterval(nperfmetric.PollInerval))),
 		metric.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
 			semconv.ServiceNameKey.String("nperf"),

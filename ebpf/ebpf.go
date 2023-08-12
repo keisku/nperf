@@ -64,7 +64,7 @@ func Start(inCtx context.Context, dns DNS) (context.CancelFunc, error) {
 		}
 	}
 	go func() {
-		metricsCollectionTicker := time.NewTicker(300 * time.Millisecond)
+		metricCollectionInterval := time.NewTicker(3 * metric.PollInerval)
 		var connTuple bpfConnTupleT
 		var connStats bpfConnStatsTsT
 		var tcpStats bpfTcpStatsT
@@ -88,7 +88,7 @@ func Start(inCtx context.Context, dns DNS) (context.CancelFunc, error) {
 					}
 				}
 				return
-			case <-metricsCollectionTicker.C:
+			case <-metricCollectionInterval.C:
 				connStatsIter := objs.ConnStats.Iterate()
 				for connStatsIter.Next(&connTuple, &connStats) {
 					if _, ok := connsByTuple[connTuple]; ok {
