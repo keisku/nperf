@@ -32,6 +32,7 @@ const (
 	TCPRecvPackets
 	TCPRtt
 	TCPRttVar
+	TCPRetransmits
 )
 
 func (n Name) String() string {
@@ -51,6 +52,7 @@ func (n Name) String() string {
 		"nperf_tcp_recv_packets",
 		"nperf_tcp_rtt",
 		"nperf_tcp_mean_deviation_rtt",
+		"nperf_tcp_retransmits",
 	}[n]
 }
 
@@ -74,6 +76,7 @@ It's vital for TCP algorithms, particularly the retransmission timeout (RTO) cal
 		TCPRttVar: {metric.WithUnit("ms"), metric.WithDescription(`The variability or fluctuation in the RTT samples.
 The mean deviation is used in conjunction with the smoothed RTT to calculate the RTO.
 A higher mean deviation indicates that the RTT samples are more variable.`)},
+		TCPRetransmits: {metric.WithUnit("packets"), metric.WithDescription(`The number of TCP packets retransmitted.`)},
 	}
 	return instrumentOptions[n]
 }
@@ -93,6 +96,7 @@ var (
 	tcpRecvPackets             metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
 	tcpRtt                     metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
 	tcpRttVar                  metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
+	tcpRetransmits             metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
 )
 
 var int64CounterMetrics = map[Name]metric.Int64Counter{
@@ -113,6 +117,7 @@ var float64ObservableGaugeMetrics = map[Name]metric.Float64ObservableGauge{
 	TCPRecvPackets:  tcpRecvPackets,
 	TCPRtt:          tcpRtt,
 	TCPRttVar:       tcpRttVar,
+	TCPRetransmits:  tcpRetransmits,
 }
 
 type datapoint[N int64 | float64] struct {
@@ -135,6 +140,7 @@ var (
 		TCPRecvPackets:  make(chan datapoint[float64], tcpChannelSize),
 		TCPRtt:          make(chan datapoint[float64], tcpChannelSize),
 		TCPRttVar:       make(chan datapoint[float64], tcpChannelSize),
+		TCPRetransmits:  make(chan datapoint[float64], tcpChannelSize),
 	}
 	once     sync.Once
 	closeChs = func() {

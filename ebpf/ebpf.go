@@ -54,6 +54,7 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 		var connTuple bpfConnTupleT
 		var connStats bpfConnStatsTsT
 		var tcpStats bpfTcpStatsT
+		var tcpRetransmits uint32
 		for {
 			// connsByTuple is used to detect whether we are iterating over
 			// a connection we have previously seen. This can happen when
@@ -81,10 +82,6 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 						continue
 					}
 					connsByTuple[connTuple] = struct{}{}
-					if err := objs.TcpStats.Lookup(&connTuple, &tcpStats); err != nil {
-						slog.Warn("can't lookup tcpStats", slog.Any("error", err), slog.Any("conn_tuple", connTuple))
-						continue
-					}
 					saddr := utilnetip.FromLowHigh(connTuple.SaddrL, connTuple.SaddrH)
 					daddr := utilnetip.FromLowHigh(connTuple.DaddrL, connTuple.DaddrH)
 					attrs := []attribute.KeyValue{
@@ -99,8 +96,16 @@ func Start(inCtx context.Context) (context.CancelFunc, error) {
 					metric.Gauge(metric.TCPRecvBytes, float64(connStats.RecvBytes)/1000, attrs...)
 					metric.Gauge(metric.TCPSentPackets, float64(connStats.SentPackets), attrs...)
 					metric.Gauge(metric.TCPRecvPackets, float64(connStats.RecvPackets), attrs...)
-					metric.Gauge(metric.TCPRtt, float64(tcpStats.Rtt)/1000, attrs...)
-					metric.Gauge(metric.TCPRttVar, float64(tcpStats.RttVar)/1000, attrs...)
+					if err := objs.TcpStats.Lookup(&connTuple, &tcpStats); err == nil {
+						metric.Gauge(metric.TCPRtt, float64(tcpStats.Rtt)/1000, attrs...)
+						metric.Gauge(metric.TCPRttVar, float64(tcpStats.RttVar)/1000, attrs...)
+					} else {
+						slog.Warn("can't lookup tcpStats", slog.Any("error", err), slog.Any("conn_tuple", connTuple))
+					}
+					if err := objs.TcpRetransmits.Lookup(&connTuple, &tcpRetransmits); err == nil {
+						// Don't log if there are no retransmits since it's a common & positive case.
+						metric.Gauge(metric.TCPRetransmits, float64(tcpRetransmits), attrs...)
+					}
 				}
 				if err := connStatsIter.Err(); err != nil {
 					slog.Warn("can't iterate over connStats", slog.Any("error", err))
