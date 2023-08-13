@@ -31,10 +31,9 @@ type Monitor struct {
 
 // answer represents a DNS answer.
 type answer struct {
-	Name      string        `json:"name"`
-	IPAddr    netip.Addr    `json:"ip_addr,omitempty"`
-	TTL       time.Duration `json:"ttl"`
-	ExpiredAt time.Time     `json:"expired_at"`
+	Name      string     `json:"name"`
+	IPAddr    netip.Addr `json:"ip_addr,omitempty"`
+	ExpiredAt time.Time  `json:"expired_at"`
 }
 
 type queryStatsKey struct {
@@ -139,14 +138,14 @@ func (m *Monitor) Run(ctx context.Context) {
 // It blocks until the context is canceled.
 func (m *Monitor) pollPackets(ctx context.Context) {
 	pollPacketInterval := time.NewTicker(5 * time.Millisecond)
-	clearExpiredAnswerInterval := time.NewTicker(5 * time.Second)
+	deleteExpiredAnswerInterval := time.NewTicker(time.Minute)
 	for {
 		select {
 		case <-ctx.Done():
 			pollPacketInterval.Stop()
-			clearExpiredAnswerInterval.Stop()
+			deleteExpiredAnswerInterval.Stop()
 			return
-		case <-clearExpiredAnswerInterval.C:
+		case <-deleteExpiredAnswerInterval.C:
 			// To prevent memory leak, delete expired answers.
 			m.answers.Range(func(k, v any) bool {
 				ipAddr := k.(netip.Addr)
@@ -197,6 +196,11 @@ func (m *Monitor) processPacket(ctx context.Context, data []byte, packetCaptured
 	return nil
 }
 
+// answerTTL is the time to live of an answer in the cache.
+// We don't respect the original TTL of an answer because it is sometimes too short.
+// We extend the TTL to 1 minute for reliable tags regarding domain names.
+var answerTTL = time.Minute
+
 func (m *Monitor) storeAnswers(ctx context.Context, payload Payload) {
 	for _, ans := range payload.Answers {
 		if ans.Type == layers.DNSTypeCNAME {
@@ -207,12 +211,10 @@ func (m *Monitor) storeAnswers(ctx context.Context, payload Payload) {
 		if !ok {
 			continue
 		}
-		ttl := time.Duration(ans.TTL) * time.Second
 		m.answers.Store(ipAddr, answer{
 			Name:      string(ans.Name),
 			IPAddr:    ipAddr,
-			TTL:       ttl,
-			ExpiredAt: getNow().Add(ttl),
+			ExpiredAt: getNow().Add(answerTTL),
 		})
 	}
 }
@@ -239,7 +241,7 @@ func (m *Monitor) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, map
 			continue
 		}
 		answer := v.(answer)
-		if answer.ExpiredAt.Before(time.Now()) {
+		if answer.ExpiredAt.Before(getNow()) {
 			slog.Debug("delete an expired resolved answer cache")
 			m.deleteAnswer(addr, answer.Name)
 			continue

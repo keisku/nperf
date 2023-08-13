@@ -15,21 +15,21 @@ import (
 func TestMonitor_ReverseResolve(t *testing.T) {
 	type fixuture struct {
 		payloads []Payload
-		delay    time.Duration
+		ttl      time.Duration
 	}
 	tests := []struct {
-		name              string
-		fixuture          fixuture
-		addrs             []netip.Addr
-		reverseNames      map[netip.Addr]string
-		reverseCnames     map[string]string
-		wantErr           string
-		wantErrAfterDelay string
+		name                string
+		fixuture            fixuture
+		addrs               []netip.Addr
+		reverseNames        map[netip.Addr]string
+		reverseCnames       map[string]string
+		wantErr             string
+		wantErrAfterExpired string
 	}{
 		{
 			name: "resolved and expired",
 			fixuture: fixuture{
-				delay: time.Second,
+				ttl: 100 * time.Millisecond,
 				payloads: []Payload{
 					{
 						DNS: &layers.DNS{
@@ -47,7 +47,6 @@ func TestMonitor_ReverseResolve(t *testing.T) {
 								{
 									Name: []byte("hij.com"),
 									IP:   []byte{169, 62, 75, 34},
-									TTL:  1,
 								},
 							},
 						},
@@ -63,7 +62,6 @@ func TestMonitor_ReverseResolve(t *testing.T) {
 								{
 									Name: []byte("bbb.com"),
 									IP:   []byte{100, 62, 75, 34},
-									TTL:  1,
 								},
 							},
 						},
@@ -79,8 +77,8 @@ func TestMonitor_ReverseResolve(t *testing.T) {
 				"hij.com": "efg.com", "efg.com": "abc.com",
 				"bbb.com": "aaa.com",
 			},
-			wantErr:           "",
-			wantErrAfterDelay: `domains associsted with the given addresses are not found: [169.62.75.34 100.62.75.34]`,
+			wantErr:             "",
+			wantErrAfterExpired: `domains associsted with the given addresses are not found: [169.62.75.34 100.62.75.34]`,
 		},
 		{
 			name: "resolved and resolved",
@@ -92,33 +90,36 @@ func TestMonitor_ReverseResolve(t *testing.T) {
 								{
 									Name: []byte("www.example.com"),
 									IP:   []byte{93, 184, 216, 34},
-									TTL:  300,
 								},
 								{
 									Name: []byte("www.example.com"),
 									IP:   []byte{93, 184, 217, 33},
-									TTL:  300,
 								},
 								{
 									Name: []byte("www.example.com"),
 									IP:   []byte{94, 184, 216, 34},
-									TTL:  300,
 								},
 							},
 						},
 					},
 				},
 			},
-			addrs:             []netip.Addr{netip.AddrFrom4([4]byte{93, 184, 216, 34}), netip.AddrFrom4([4]byte{93, 184, 217, 33})},
-			reverseNames:      map[netip.Addr]string{netip.AddrFrom4([4]byte{93, 184, 216, 34}): "www.example.com", netip.AddrFrom4([4]byte{93, 184, 217, 33}): "www.example.com"},
-			reverseCnames:     make(map[string]string),
-			wantErr:           "",
-			wantErrAfterDelay: "",
+			addrs:               []netip.Addr{netip.AddrFrom4([4]byte{93, 184, 216, 34}), netip.AddrFrom4([4]byte{93, 184, 217, 33})},
+			reverseNames:        map[netip.Addr]string{netip.AddrFrom4([4]byte{93, 184, 216, 34}): "www.example.com", netip.AddrFrom4([4]byte{93, 184, 217, 33}): "www.example.com"},
+			reverseCnames:       make(map[string]string),
+			wantErr:             "",
+			wantErrAfterExpired: "",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(func() {
+				answerTTL = time.Minute
+			})
 			m := &Monitor{}
+			if 0 < tt.fixuture.ttl {
+				answerTTL = tt.fixuture.ttl
+			}
 			for _, payload := range tt.fixuture.payloads {
 				m.storeAnswers(context.Background(), payload)
 			}
@@ -142,9 +143,11 @@ func TestMonitor_ReverseResolve(t *testing.T) {
 				t.Errorf("ReverseResolve() = %v, want %v", cnames, tt.reverseCnames)
 				return
 			}
-			<-time.After(tt.fixuture.delay)
+			if tt.wantErrAfterExpired != "" {
+				<-time.After(answerTTL)
+			}
 			names, cnames, err = m.ReverseResolve(tt.addrs)
-			if tt.wantErrAfterDelay == "" {
+			if tt.wantErrAfterExpired == "" {
 				if !reflect.DeepEqual(names, tt.reverseNames) {
 					t.Errorf("ReverseResolve() = %v, want %v", names, tt.reverseNames)
 				}
@@ -154,10 +157,12 @@ func TestMonitor_ReverseResolve(t *testing.T) {
 				return
 			} else {
 				if err == nil {
-					t.Errorf("ReverseResolve() error = %v, wantErr %v", err, tt.wantErrAfterDelay)
+					t.Errorf("ReverseResolve() error = %v, wantErr %v", err, tt.wantErrAfterExpired)
+					return
 				}
-				if tt.wantErrAfterDelay != err.Error() {
-					t.Errorf("ReverseResolve() error = %v, wantErr %v", err, tt.wantErrAfterDelay)
+				if tt.wantErrAfterExpired != err.Error() {
+					t.Errorf("ReverseResolve() error = %v, wantErr %v", err, tt.wantErrAfterExpired)
+					return
 				}
 				count := 0
 				m.answers.Range(func(key, value interface{}) bool {
@@ -182,9 +187,10 @@ func TestMonitor_ReverseResolve(t *testing.T) {
 
 func TestMonitor_DumpAnswers(t *testing.T) {
 	type fixuture struct {
-		payloads []Payload
-		getNow   func() time.Time
-		delay    time.Duration
+		payloads    []Payload
+		ttl         time.Duration
+		shouldDelay bool
+		getNow      func() time.Time
 	}
 	tests := []struct {
 		name        string
@@ -214,7 +220,6 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 								{
 									Name: []byte("hij.com"),
 									IP:   []byte{169, 62, 75, 34},
-									TTL:  300,
 								},
 							},
 						},
@@ -225,17 +230,14 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 								{
 									Name: []byte("www.example.com"),
 									IP:   []byte{93, 184, 216, 33},
-									TTL:  300,
 								},
 								{
 									Name: []byte("www.example.com"),
 									IP:   []byte{93, 184, 216, 34},
-									TTL:  300,
 								},
 								{
 									Name: []byte("www.example.com"),
 									IP:   []byte{93, 184, 217, 33},
-									TTL:  300,
 								},
 							},
 						},
@@ -247,8 +249,7 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 					answer: answer{
 						Name:      "abc.com",
 						IPAddr:    netip.AddrFrom4([4]byte{169, 62, 75, 34}),
-						TTL:       300 * time.Second,
-						ExpiredAt: time.Date(2023, 8, 13, 3, 28, 6, 0, time.UTC),
+						ExpiredAt: time.Date(2023, 8, 13, 3, 24, 6, 0, time.UTC),
 					},
 					Cnames: []string{"hij.com", "efg.com"},
 				},
@@ -256,24 +257,21 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 					answer: answer{
 						Name:      "www.example.com",
 						IPAddr:    netip.AddrFrom4([4]byte{93, 184, 216, 33}),
-						TTL:       300 * time.Second,
-						ExpiredAt: time.Date(2023, 8, 13, 3, 28, 6, 0, time.UTC),
+						ExpiredAt: time.Date(2023, 8, 13, 3, 24, 6, 0, time.UTC),
 					},
 				},
 				{
 					answer: answer{
 						Name:      "www.example.com",
 						IPAddr:    netip.AddrFrom4([4]byte{93, 184, 216, 34}),
-						TTL:       300 * time.Second,
-						ExpiredAt: time.Date(2023, 8, 13, 3, 28, 6, 0, time.UTC),
+						ExpiredAt: time.Date(2023, 8, 13, 3, 24, 6, 0, time.UTC),
 					},
 				},
 				{
 					answer: answer{
 						Name:      "www.example.com",
 						IPAddr:    netip.AddrFrom4([4]byte{93, 184, 217, 33}),
-						TTL:       300 * time.Second,
-						ExpiredAt: time.Date(2023, 8, 13, 3, 28, 6, 0, time.UTC),
+						ExpiredAt: time.Date(2023, 8, 13, 3, 24, 6, 0, time.UTC),
 					},
 				},
 			},
@@ -281,8 +279,8 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 		{
 			name: "ttl expired",
 			fixuture: fixuture{
-				getNow: time.Now,
-				delay:  time.Second,
+				ttl:         time.Millisecond,
+				shouldDelay: true,
 				payloads: []Payload{
 					{
 						DNS: &layers.DNS{
@@ -290,7 +288,6 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 								{
 									Name: []byte("zzz.com"),
 									IP:   []byte{169, 62, 75, 34},
-									TTL:  1,
 								},
 							},
 						},
@@ -301,12 +298,10 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 								{
 									Name: []byte("github.com"),
 									IP:   []byte{20, 27, 177, 113},
-									TTL:  1,
 								},
 								{
 									Name: []byte("github.com"),
 									IP:   []byte{20, 27, 177, 114},
-									TTL:  1,
 								},
 							},
 						},
@@ -317,17 +312,14 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 								{
 									Name: []byte("www.example.com"),
 									IP:   []byte{93, 184, 216, 34},
-									TTL:  1,
 								},
 								{
 									Name: []byte("www.example.com"),
 									IP:   []byte{93, 184, 217, 33},
-									TTL:  1,
 								},
 								{
 									Name: []byte("www.example.com"),
 									IP:   []byte{94, 184, 216, 34},
-									TTL:  1,
 								},
 							},
 						},
@@ -339,18 +331,30 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(func() {
+				answerTTL = time.Minute
+				getNow = time.Now
+			})
 			m := &Monitor{}
-			getNow = tt.fixuture.getNow
+			if tt.fixuture.getNow != nil {
+				getNow = tt.fixuture.getNow
+			}
+			if 0 < tt.fixuture.ttl {
+				answerTTL = tt.fixuture.ttl
+			}
 			for _, payload := range tt.fixuture.payloads {
 				m.storeAnswers(context.Background(), payload)
 			}
-			<-time.After(tt.fixuture.delay)
+			if tt.fixuture.shouldDelay {
+				<-time.After(answerTTL)
+			}
 			var w bytes.Buffer
 			m.DumpAnswers(&w)
 			var gotAnswers []answerToDump
 			json.NewDecoder(&w).Decode(&gotAnswers)
 			if len(tt.wantAnswers) == 0 && 0 < len(gotAnswers) {
 				t.Error("DumpAnswers() = empty, want empty")
+				return
 			}
 			if 0 < len(tt.wantAnswers) && !reflect.DeepEqual(gotAnswers, tt.wantAnswers) {
 				t.Errorf("DumpAnswers() = %v, want %v", gotAnswers, tt.wantAnswers)
