@@ -17,13 +17,13 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -no-global-types -type conn_tuple_t -type conn_stats_ts_t -type tcp_stats_t bpf ./c/bpf_prog.c -- -I./c
 
 type DNS interface {
-	ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, error)
+	ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, map[string]string, error)
 }
 
 type noopDNS struct{}
 
-func (noopDNS) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, error) {
-	return nil, nil
+func (noopDNS) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, map[string]string, error) {
+	return nil, nil, nil
 }
 
 var objs bpfObjects
@@ -106,15 +106,12 @@ func Start(inCtx context.Context, dns DNS) (context.CancelFunc, error) {
 						{Key: "netns", Value: attribute.Int64Value(int64(connTuple.Netns))},
 						{Key: "pid", Value: attribute.Int64Value(int64(connTuple.Pid))},
 					}
-					domains, err := dns.ReverseResolve([]netip.Addr{saddr, daddr})
-					if err != nil {
+					domains, cnames, err := dns.ReverseResolve([]netip.Addr{saddr, daddr})
+					if err == nil {
+						attrs = append(attrs, resolveDomainAndCnamesToAttributes("saddr", saddr, domains, cnames)...)
+						attrs = append(attrs, resolveDomainAndCnamesToAttributes("daddr", daddr, domains, cnames)...)
+					} else {
 						slog.Debug(err.Error(), slog.String("saddr", saddr.String()), slog.String("daddr", daddr.String()))
-					}
-					if domain, ok := domains[saddr]; ok {
-						attrs = append(attrs, attribute.KeyValue{Key: "saddr_domain", Value: attribute.StringValue(domain)})
-					}
-					if domain, ok := domains[daddr]; ok {
-						attrs = append(attrs, attribute.KeyValue{Key: "daddr_domain", Value: attribute.StringValue(domain)})
 					}
 					metric.Gauge(metric.TCPSentBytes, float64(connStats.SentBytes)/1000, attrs...)
 					metric.Gauge(metric.TCPRecvBytes, float64(connStats.RecvBytes)/1000, attrs...)
@@ -138,4 +135,27 @@ func Start(inCtx context.Context, dns DNS) (context.CancelFunc, error) {
 		}
 	}()
 	return cancel, nil
+}
+
+func resolveDomainAndCnamesToAttributes(key string, ipAddr netip.Addr, reverseDomain map[netip.Addr]string, reverseCname map[string]string) []attribute.KeyValue {
+	var kvs []attribute.KeyValue
+	domain, ok := reverseDomain[ipAddr]
+	if !ok {
+		return kvs
+	}
+	var resolvedCnames []string
+	name := domain
+	for {
+		cname, ok := reverseCname[name]
+		if !ok {
+			break
+		}
+		name = cname
+		resolvedCnames = append(resolvedCnames, name)
+	}
+	kvs = append(kvs, attribute.KeyValue{Key: attribute.Key(fmt.Sprintf("%s_domain", key)), Value: attribute.StringValue(name)})
+	if 0 < len(resolvedCnames) {
+		kvs = append(kvs, attribute.KeyValue{Key: attribute.Key(fmt.Sprintf("%s_cname", key)), Value: attribute.StringSliceValue(resolvedCnames)})
+	}
+	return kvs
 }
