@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
-	"strings"
 	"syscall"
 
 	"github.com/google/gopacket"
@@ -17,29 +16,6 @@ import (
 var (
 	errTruncated      = errors.New("the packet is truncated")
 	errSkippedPayload = errors.New("the packet does not contain relevant DNS response")
-
-	queryTypeStringMap = map[string]layers.DNSType{
-		layers.DNSTypeA.String():     layers.DNSTypeA,
-		layers.DNSTypeNS.String():    layers.DNSTypeNS,
-		layers.DNSTypeMD.String():    layers.DNSTypeMD,
-		layers.DNSTypeMF.String():    layers.DNSTypeMF,
-		layers.DNSTypeCNAME.String(): layers.DNSTypeCNAME,
-		layers.DNSTypeSOA.String():   layers.DNSTypeSOA,
-		layers.DNSTypeMB.String():    layers.DNSTypeMB,
-		layers.DNSTypeMG.String():    layers.DNSTypeMG,
-		layers.DNSTypeMR.String():    layers.DNSTypeMR,
-		layers.DNSTypeNULL.String():  layers.DNSTypeNULL,
-		layers.DNSTypeWKS.String():   layers.DNSTypeWKS,
-		layers.DNSTypePTR.String():   layers.DNSTypePTR,
-		layers.DNSTypeHINFO.String(): layers.DNSTypeHINFO,
-		layers.DNSTypeMINFO.String(): layers.DNSTypeMINFO,
-		layers.DNSTypeMX.String():    layers.DNSTypeMX,
-		layers.DNSTypeTXT.String():   layers.DNSTypeTXT,
-		layers.DNSTypeAAAA.String():  layers.DNSTypeAAAA,
-		layers.DNSTypeSRV.String():   layers.DNSTypeSRV,
-		layers.DNSTypeOPT.String():   layers.DNSTypeOPT,
-		layers.DNSTypeURI.String():   layers.DNSTypeURI,
-	}
 )
 
 // The parser struct contains the necessary components to parse a DNS packet.
@@ -55,7 +31,7 @@ type parser struct {
 	recodedQueryTypes map[layers.DNSType]struct{}
 }
 
-func newParser(queryTypes []string) *parser {
+func newParser() *parser {
 	ipv4Payload := &layers.IPv4{}
 	ipv6Payload := &layers.IPv6{}
 	udpPayload := &layers.UDP{}
@@ -69,28 +45,18 @@ func newParser(queryTypes []string) *parser {
 		tcpPayload,
 		dnsPayload,
 	}
-	var qtypes strings.Builder
-	recodedQueryTypes := map[layers.DNSType]struct{}{
-		layers.DNSTypeA: {},
-	}
-	qtypes.WriteString(layers.DNSTypeA.String())
-	for _, qt := range queryTypes {
-		if dnsType, ok := queryTypeStringMap[qt]; ok {
-			recodedQueryTypes[dnsType] = struct{}{}
-			qtypes.WriteString(fmt.Sprintf(", %s", dnsType.String()))
-		} else {
-			slog.Warn(fmt.Sprintf("unknown DNS query type %q", qt))
-		}
-	}
-	slog.Info(fmt.Sprintf("DNS Monitor will record queries of type %q", qtypes.String()))
 	return &parser{
-		decoder:           gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, decoders...),
-		ipv4Payload:       ipv4Payload,
-		ipv6Payload:       ipv6Payload,
-		udpPayload:        udpPayload,
-		tcpPayload:        tcpPayload,
-		dnsPayload:        dnsPayload,
-		recodedQueryTypes: recodedQueryTypes,
+		decoder:     gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, decoders...),
+		ipv4Payload: ipv4Payload,
+		ipv6Payload: ipv6Payload,
+		udpPayload:  udpPayload,
+		tcpPayload:  tcpPayload,
+		dnsPayload:  dnsPayload,
+		recodedQueryTypes: map[layers.DNSType]struct{}{
+			layers.DNSTypeA:     {},
+			layers.DNSTypeAAAA:  {},
+			layers.DNSTypeCNAME: {},
+		},
 	}
 }
 

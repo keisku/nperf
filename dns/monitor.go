@@ -100,14 +100,14 @@ func (m *Monitor) recordQueryStats(payload Payload, capturedAt time.Time) error 
 	return nil
 }
 
-func NewMonitor(config Config) (*Monitor, error) {
+func NewMonitor() (*Monitor, error) {
 	tpacket, err := newTPacket()
 	if err != nil {
 		return nil, fmt.Errorf("create raw socket: %s", err)
 	}
 	return &Monitor{
 		sourceTPacket: tpacket,
-		parser:        newParser(config.QueryTypes),
+		parser:        newParser(),
 		queryStats:    make(map[queryStatsKey]queryStatsValue),
 	}, nil
 }

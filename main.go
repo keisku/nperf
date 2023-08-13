@@ -138,7 +138,7 @@ func (o *Options) Run(ctx context.Context) error {
 	}
 
 	// DNS
-	dnsMonitor, err := dns.NewMonitor(dns.Config{})
+	dnsMonitor, err := dns.NewMonitor()
 	if err != nil {
 		return fmt.Errorf("failed to create DNS Monitor: %s", err)
 	}
