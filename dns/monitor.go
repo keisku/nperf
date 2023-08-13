@@ -2,8 +2,11 @@ package dns
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/netip"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -15,16 +18,22 @@ import (
 	"golang.org/x/exp/slog"
 )
 
+// getNow is a variable for testing.
+var getNow = time.Now
+
 type Monitor struct {
 	sourceTPacket *afpacket.TPacket
 	parser        *parser
 	queryStats    map[queryStatsKey]queryStatsValue
-	answers       sync.Map // key: netip.Addr, value: answer
+	answers       sync.Map // key: netip.Addr, value: Answer
 }
 
-type answer struct {
-	Name      string
-	ExpiredAt time.Time
+// Answer represents a DNS answer.
+type Answer struct {
+	Name      string        `json:"name"`
+	IPAddrs   []netip.Addr  `json:"ip_addrs"`
+	TTL       time.Duration `json:"ttl"`
+	ExpiredAt time.Time     `json:"expired_at"`
 }
 
 type queryStatsKey struct {
@@ -137,7 +146,7 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 		case <-clearExpiredAnswerInterval.C:
 			// To prevent memory leak, delete expired answers.
 			m.answers.Range(func(k, v any) bool {
-				answer, ok := v.(answer)
+				answer, ok := v.(Answer)
 				if !ok {
 					slog.Warn("delete an unexpected type of answer", attribute.String("type", fmt.Sprintf("%T", v)))
 					m.answers.Delete(k)
@@ -196,9 +205,11 @@ func (m *Monitor) storeDomains(ctx context.Context, payload Payload) {
 			continue
 		}
 		ttl := time.Duration(ans.TTL) * time.Second
-		m.answers.Store(ipAddr, answer{
+		m.answers.Store(ipAddr, Answer{
 			Name:      string(ans.Name),
-			ExpiredAt: time.Now().Add(ttl), // Update the expiration time
+			IPAddrs:   []netip.Addr{ipAddr},
+			TTL:       ttl,
+			ExpiredAt: getNow().Add(ttl),
 		})
 	}
 }
@@ -211,7 +222,7 @@ func (m *Monitor) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, err
 		if !ok {
 			continue
 		}
-		answer, ok := v.(answer)
+		answer, ok := v.(Answer)
 		if !ok {
 			slog.Warn("delete an unexpected type of answer", attribute.String("type", fmt.Sprintf("%T", v)))
 			m.answers.Delete(addr)
@@ -232,4 +243,74 @@ func (m *Monitor) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, err
 		return nil, fmt.Errorf("domains associsted with the given addresses are not found: %v", addrs)
 	}
 	return domains, nil
+}
+
+func mergeAnswers(answers []Answer) []Answer {
+	mergedMap := make(map[string]Answer)
+	for _, answer := range answers {
+		if existing, ok := mergedMap[answer.Name]; ok {
+			// Merging IP addresses and ensuring uniqueness
+			existingSet := make(map[string]bool)
+			for _, ip := range existing.IPAddrs {
+				existingSet[ip.String()] = true
+			}
+			for _, ip := range answer.IPAddrs {
+				if !existingSet[ip.String()] {
+					existing.IPAddrs = append(existing.IPAddrs, ip)
+				}
+			}
+			sort.Slice(existing.IPAddrs, func(i, j int) bool {
+				return existing.IPAddrs[i].String() < existing.IPAddrs[j].String()
+			})
+			mergedMap[answer.Name] = existing
+		} else {
+			mergedMap[answer.Name] = answer
+		}
+	}
+
+	// Convert the map to a slice
+	merged := make([]Answer, 0, len(mergedMap))
+	for _, answer := range mergedMap {
+		merged = append(merged, answer)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].Name < merged[j].Name
+	})
+	return merged
+}
+
+// DumpAnswers dumps all the dns record answers to the given writer.
+func (m *Monitor) DumpAnswers(w io.Writer) error {
+	var answers []Answer
+	m.answers.Range(func(k, v any) bool {
+		ipAddr, ok := k.(netip.Addr)
+		if !ok {
+			slog.Warn("delete an unexpected type of key", attribute.String("type", fmt.Sprintf("%T", k)))
+			m.answers.Delete(k)
+			return true
+		}
+		answer, ok := v.(Answer)
+		if !ok {
+			slog.Warn("delete an unexpected type of answer", attribute.String("type", fmt.Sprintf("%T", v)))
+			m.answers.Delete(k)
+			return true
+		}
+		if answer.ExpiredAt.Before(getNow()) {
+			slog.Debug("delete an expired resolved answer",
+				attribute.String("name", answer.Name),
+				attribute.String("ip_addr", ipAddr.String()),
+				attribute.String("expired_at", answer.ExpiredAt.String()))
+			m.answers.Delete(k)
+			return true
+		}
+		answers = append(answers, answer)
+		return true
+	})
+	answersToDump := mergeAnswers(answers)
+	data, err := json.MarshalIndent(answersToDump, "", "    ")
+	if err != nil {
+		return fmt.Errorf("marshal answers: %s", err)
+	}
+	_, _ = w.Write(data)
+	return nil
 }

@@ -153,6 +153,9 @@ func (o *Options) Run(ctx context.Context) error {
 	// HTTP server
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/debug/dns/answers", func(w http.ResponseWriter, r *http.Request) {
+		dnsMonitor.DumpAnswers(w)
+	})
 	go func() {
 		err := http.ListenAndServe(fmt.Sprintf(":%d", o.Port), mux)
 		if err != nil {
