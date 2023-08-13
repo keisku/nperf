@@ -81,7 +81,7 @@ func TestMonitor_ReverseResolve(t *testing.T) {
 			m := &Monitor{
 				answers: syncMap,
 			}
-			m.storeDomains(context.Background(), tt.fixuture.payload)
+			m.storeAnswers(context.Background(), tt.fixuture.payload)
 			got, err := m.ReverseResolve(tt.args.addrs)
 			if err == nil {
 				if tt.wantErr != "" {
@@ -273,7 +273,7 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 			}
 			getNow = tt.fixuture.getNow
 			for _, payload := range tt.fixuture.payloads {
-				m.storeDomains(context.Background(), payload)
+				m.storeAnswers(context.Background(), payload)
 			}
 			<-time.After(tt.fixuture.delay)
 			var w bytes.Buffer

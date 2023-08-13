@@ -191,14 +191,14 @@ func (m *Monitor) processPacket(ctx context.Context, data []byte, packetCaptured
 	if err := m.parser.parse(data, &payload); err != nil {
 		return fmt.Errorf("parse a DNS packet: %s", err)
 	}
-	m.storeDomains(ctx, payload)
+	m.storeAnswers(ctx, payload)
 	if err := m.recordQueryStats(payload, packetCapturedAt); err != nil {
 		return fmt.Errorf("record DNS statistics: %s", err)
 	}
 	return nil
 }
 
-func (m *Monitor) storeDomains(ctx context.Context, payload Payload) {
+func (m *Monitor) storeAnswers(ctx context.Context, payload Payload) {
 	for _, ans := range payload.Answers {
 		ipAddr, ok := netip.AddrFromSlice(ans.IP)
 		if !ok {
