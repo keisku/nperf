@@ -143,6 +143,8 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			pollPacketInterval.Stop()
+			clearExpiredAnswerInterval.Stop()
 			return
 		case <-clearExpiredAnswerInterval.C:
 			// To prevent memory leak, delete expired answers.

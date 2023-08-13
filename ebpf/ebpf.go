@@ -79,6 +79,7 @@ func Start(inCtx context.Context, dns DNS) (context.CancelFunc, error) {
 			select {
 			case <-ctx.Done():
 				slog.Info("exiting ebpf programs...")
+				metricCollectionInterval.Stop()
 				if err := objs.Close(); err != nil {
 					slog.Warn("can't close bpf objects", slog.Any("error", err))
 				}
