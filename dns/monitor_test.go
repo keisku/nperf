@@ -245,12 +245,12 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 			wantAnswers: []answerToDump{
 				{
 					answer: answer{
-						Name:      "hij.com",
+						Name:      "abc.com",
 						IPAddr:    netip.AddrFrom4([4]byte{169, 62, 75, 34}),
 						TTL:       300 * time.Second,
 						ExpiredAt: time.Date(2023, 8, 13, 3, 28, 6, 0, time.UTC),
 					},
-					Cnames: []string{"efg.com", "abc.com"},
+					Cnames: []string{"hij.com", "efg.com"},
 				},
 				{
 					answer: answer{

@@ -32,7 +32,7 @@ type Monitor struct {
 // answer represents a DNS answer.
 type answer struct {
 	Name      string        `json:"name"`
-	IPAddr    netip.Addr    `json:"ip_addr"`
+	IPAddr    netip.Addr    `json:"ip_addr,omitempty"`
 	TTL       time.Duration `json:"ttl"`
 	ExpiredAt time.Time     `json:"expired_at"`
 }
@@ -276,14 +276,13 @@ func (m *Monitor) DumpAnswers(w io.Writer) error {
 			return true
 		}
 		var cnames []string
-		name := answer.Name
 		for {
-			resolvedCname, ok := m.reverseCnames.Load(name)
+			resolvedCname, ok := m.reverseCnames.Load(answer.Name)
 			if !ok {
 				break
 			}
-			cnames = append(cnames, resolvedCname.(string))
-			name = resolvedCname.(string)
+			cnames = append(cnames, answer.Name)
+			answer.Name = resolvedCname.(string)
 		}
 		answers = append(answers, answerToDump{
 			answer: answer,
