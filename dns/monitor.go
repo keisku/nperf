@@ -147,14 +147,10 @@ func (m *Monitor) pollPackets(ctx context.Context) {
 		case <-clearExpiredAnswerInterval.C:
 			// To prevent memory leak, delete expired answers.
 			m.answers.Range(func(k, v any) bool {
-				answer, ok := v.(answer)
-				if !ok {
-					slog.Warn("delete an unexpected type of answer", attribute.String("type", fmt.Sprintf("%T", v)))
-					m.answers.Delete(k)
-					return true
-				}
+				ipAddr := k.(netip.Addr)
+				answer := v.(answer)
 				if answer.ExpiredAt.Before(time.Now()) {
-					m.answers.Delete(k)
+					m.deleteAnswer(ipAddr, answer.Name)
 				}
 				return true
 			})
@@ -219,6 +215,18 @@ func (m *Monitor) storeAnswers(ctx context.Context, payload Payload) {
 	}
 }
 
+func (m *Monitor) deleteAnswer(addr netip.Addr, name string) {
+	m.answers.Delete(addr)
+	for {
+		slog.Debug("delete an expired resolved cname cache")
+		resolvedCname, ok := m.reverseCnames.LoadAndDelete(name)
+		if !ok {
+			break
+		}
+		name = resolvedCname.(string)
+	}
+}
+
 // ReverseResolve resolves IP addresses to domain names and reverse CNAMEs.
 func (m *Monitor) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, map[string]string, error) {
 	domains := make(map[netip.Addr]string, len(addrs))
@@ -228,24 +236,10 @@ func (m *Monitor) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, map
 		if !ok {
 			continue
 		}
-		answer, ok := v.(answer)
-		if !ok {
-			slog.Warn("delete an unexpected type of answer", attribute.String("type", fmt.Sprintf("%T", v)))
-			m.answers.Delete(addr)
-			continue
-		}
+		answer := v.(answer)
 		if answer.ExpiredAt.Before(time.Now()) {
 			slog.Debug("delete an expired resolved answer cache")
-			m.answers.Delete(addr)
-			name := answer.Name
-			for {
-				slog.Debug("delete an expired resolved cname cache")
-				resolvedCname, ok := m.reverseCnames.LoadAndDelete(name)
-				if !ok {
-					break
-				}
-				name = resolvedCname.(string)
-			}
+			m.deleteAnswer(addr, answer.Name)
 			continue
 		}
 		name := answer.Name
@@ -274,30 +268,11 @@ type answerToDump struct {
 func (m *Monitor) DumpAnswers(w io.Writer) error {
 	var answers []answerToDump
 	m.answers.Range(func(k, v any) bool {
-		ipAddr, ok := k.(netip.Addr)
-		if !ok {
-			slog.Warn("delete an unexpected type of key", attribute.String("type", fmt.Sprintf("%T", k)))
-			m.answers.Delete(k)
-			return true
-		}
-		answer, ok := v.(answer)
-		if !ok {
-			slog.Warn("delete an unexpected type of answer", attribute.String("type", fmt.Sprintf("%T", v)))
-			m.answers.Delete(k)
-			return true
-		}
+		ipAddr := k.(netip.Addr)
+		answer := v.(answer)
 		if answer.ExpiredAt.Before(getNow()) {
 			slog.Debug("delete an expired resolved answer cache")
-			m.answers.Delete(ipAddr)
-			name := answer.Name
-			for {
-				slog.Debug("delete an expired resolved cname cache")
-				resolvedCname, ok := m.reverseCnames.LoadAndDelete(name)
-				if !ok {
-					break
-				}
-				name = resolvedCname.(string)
-			}
+			m.deleteAnswer(ipAddr, answer.Name)
 			return true
 		}
 		var cnames []string
