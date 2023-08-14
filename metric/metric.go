@@ -2,13 +2,13 @@ package metric
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
-	"golang.org/x/exp/slog"
 )
 
 const PollInerval = 100 * time.Millisecond

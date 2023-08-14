@@ -3,6 +3,7 @@ package ebpf
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/keisku/nperf/metric"
 	utilnetip "github.com/keisku/nperf/util/netip"
 	"go.opentelemetry.io/otel/attribute"
-	"golang.org/x/exp/slog"
 )
 
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/netip"
 	"sort"
 	"sync"
@@ -15,7 +16,6 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/keisku/nperf/metric"
 	"go.opentelemetry.io/otel/attribute"
-	"golang.org/x/exp/slog"
 )
 
 // getNow is a variable for testing.

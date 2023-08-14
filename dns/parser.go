@@ -3,6 +3,7 @@ package dns
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"syscall"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/keisku/nperf/metric"
 	"go.opentelemetry.io/otel/attribute"
-	"golang.org/x/exp/slog"
 )
 
 var (
