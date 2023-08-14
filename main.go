@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/keisku/nperf/dns"
@@ -20,21 +19,26 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"go.opentelemetry.io/otel/sdk/resource"
-	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
 )
 
 type Options struct {
-	Output       string
-	OutputFormat string
-	Port         int
-	DisableDNS   bool
-	DisableeBPF  bool
+	Output            string
+	OutputFormat      string
+	Port              int
+	DisableDNS        bool
+	DisableeBPF       bool
+	IncludeNames      []string
+	ExcludeNames      []string
+	IncludeAttributes []string
+	ExcludeAttributes []string
+
+	includeNames      map[string]struct{}
+	excludeNames      map[string]struct{}
+	includeAttributes map[string]string
+	excludeAttributes map[string]string
 }
 
 func (o *Options) Validate() error {
@@ -52,66 +56,33 @@ func (o *Options) Validate() error {
 		logHandler = slog.NewTextHandler(logWriter, nil)
 	}
 	slog.SetDefault(slog.New(logHandler))
-	return nil
-}
-
-// encoder writes metric data to stdout
-type encoder struct{}
-
-// TODO: This is a temporary implementation.
-// - Support flitering by metric name.
-func (encoder) Encode(v any) error {
-	resourceMetrics, ok := v.(*metricdata.ResourceMetrics)
-	if !ok {
-		slog.Warn("failed to cast to metricdata.ResourceMetrics", slog.Any("value", v))
-		return nil
+	for _, name := range o.IncludeNames {
+		o.includeNames[name] = struct{}{}
 	}
-	for _, scopeMetric := range resourceMetrics.ScopeMetrics {
-		for _, m := range scopeMetric.Metrics {
-			switch v := m.Data.(type) {
-			case metricdata.Gauge[int64]:
-				for _, dp := range v.DataPoints {
-					slog.Info(m.Name, slog.Int64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", getAttrs(dp.Attributes)))
-				}
-			case metricdata.Gauge[float64]:
-				for _, dp := range v.DataPoints {
-					slog.Info(m.Name, slog.Float64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", getAttrs(dp.Attributes)))
-				}
-			case metricdata.Histogram[float64]:
-				for _, dp := range v.DataPoints {
-					slog.Info(m.Name, slog.Float64("value", dp.Sum/float64(dp.Count)), slog.String("unit", m.Unit), slog.Any("attributes", getAttrs(dp.Attributes)))
-				}
-			}
+	for _, name := range o.ExcludeNames {
+		o.excludeNames[name] = struct{}{}
+	}
+	for _, attr := range o.IncludeAttributes {
+		kv := strings.Split(attr, ":")
+		if len(kv) != 2 {
+			slog.Warn("invalid input", slog.String("attribute", attr))
+			continue
 		}
+		o.includeAttributes[kv[0]] = kv[1]
+	}
+	for _, attr := range o.ExcludeAttributes {
+		kv := strings.Split(attr, ":")
+		if len(kv) != 2 {
+			slog.Warn("invalid input", slog.String("attribute", attr))
+			continue
+		}
+		o.excludeAttributes[kv[0]] = kv[1]
 	}
 	return nil
 }
 
-func getAttrs(attrs attribute.Set) map[string][]string {
-	keysMap := make(map[string][]string)
-	itr := attrs.Iter()
-	for itr.Next() {
-		kv := itr.Attribute()
-		key := strings.Map(sanitizeRune, string(kv.Key))
-		if _, ok := keysMap[key]; !ok {
-			keysMap[key] = []string{kv.Value.Emit()}
-		} else {
-			// if the sanitized key is a duplicate, append to the list of keys
-			keysMap[key] = append(keysMap[key], kv.Value.Emit())
-		}
-	}
-	return keysMap
-}
-
-func sanitizeRune(r rune) rune {
-	if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ':' || r == '_' {
-		return r
-	}
-	return '_'
-}
-
-func initMeterProvider() (func(context.Context) error, error) {
-	stdoutExporter, err := stdoutmetric.New(stdoutmetric.WithEncoder(encoder{}))
+func initMeterProvider(encoder stdoutmetric.Encoder) (func(context.Context) error, error) {
+	stdoutExporter, err := stdoutmetric.New(stdoutmetric.WithEncoder(encoder))
 	if err != nil {
 		return nil, fmt.Errorf("create stdout exporter: %s", err)
 	}
@@ -123,17 +94,18 @@ func initMeterProvider() (func(context.Context) error, error) {
 		metric.WithReader(reader),
 		// Every 100ms, write metrics to io.Writer of slog.
 		metric.WithReader(metric.NewPeriodicReader(stdoutExporter, metric.WithInterval(nperfmetric.PollInerval))),
-		metric.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String("nperf"),
-		)),
 	)
 	otel.SetMeterProvider(meterProvider)
 	return meterProvider.Shutdown, nil
 }
 
 func (o *Options) Run(ctx context.Context) error {
-	shutdownMeterProvider, err := initMeterProvider()
+	shutdownMeterProvider, err := initMeterProvider(nperfmetric.FilterPrinter{
+		IncludeNames:      o.includeNames,
+		ExcludeNames:      o.excludeNames,
+		IncludeAttributes: o.includeAttributes,
+		ExcludeAttributes: o.excludeAttributes,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create meter provider: %s", err)
 	}
@@ -200,11 +172,19 @@ func (o *Options) Run(ctx context.Context) error {
 
 func NewCmd() *cobra.Command {
 	o := &Options{
-		Output:       "",
-		OutputFormat: "json",
-		Port:         7000,
-		DisableDNS:   false,
-		DisableeBPF:  false,
+		Output:            "",
+		OutputFormat:      "json",
+		Port:              7000,
+		DisableDNS:        false,
+		DisableeBPF:       false,
+		IncludeNames:      []string{},
+		ExcludeNames:      []string{},
+		IncludeAttributes: []string{},
+		ExcludeAttributes: []string{},
+		includeNames:      make(map[string]struct{}),
+		excludeNames:      make(map[string]struct{}),
+		includeAttributes: make(map[string]string),
+		excludeAttributes: make(map[string]string),
 	}
 	cmd := &cobra.Command{
 		Use:          "ntop",
@@ -215,6 +195,10 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.Port, "port", "p", o.Port, "port to listen on")
 	cmd.Flags().BoolVar(&o.DisableDNS, "disable-dns", o.DisableDNS, "disable DNS monitoring")
 	cmd.Flags().BoolVar(&o.DisableeBPF, "disable-ebpf", o.DisableeBPF, "disable ebpf monitoring")
+	cmd.Flags().StringArrayVar(&o.IncludeNames, "include", o.IncludeNames, `include these names in the output. include is prioritized over exclude. e.g., "nperf_tcp_rtt"`)
+	cmd.Flags().StringArrayVar(&o.ExcludeNames, "exclude", o.ExcludeNames, `exclude these names in the output, e.g., "nperf_tcp_rtt"`)
+	cmd.Flags().StringArrayVar(&o.IncludeAttributes, "include-attribute", o.IncludeAttributes, "include these attributes in the output. include is prioritized over exclude. e.g., key:value")
+	cmd.Flags().StringArrayVar(&o.ExcludeAttributes, "exclude-attribute", o.ExcludeAttributes, "exclude these attributes in the output, e.g, key:value")
 	cmd.RunE = func(c *cobra.Command, _ []string) error {
 		if err := o.Validate(); err != nil {
 			return err

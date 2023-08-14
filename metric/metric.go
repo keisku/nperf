@@ -3,12 +3,16 @@ package metric
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 const PollInerval = 100 * time.Millisecond
@@ -263,4 +267,181 @@ func Gauge(name Name, value float64, attrs ...attribute.KeyValue) {
 			slog.Warn("The datapoint is dropped because the name is not found")
 		}
 	}
+}
+
+// FilterPrinter is a printer that filters the output.
+// TODO: Support regex.
+// TODO: Create unit tests.
+type FilterPrinter struct {
+	IncludeNames      map[string]struct{}
+	ExcludeNames      map[string]struct{}
+	IncludeAttributes map[string]string
+	ExcludeAttributes map[string]string
+}
+
+var _ stdoutmetric.Encoder = FilterPrinter{}
+
+func (p FilterPrinter) Encode(v any) error {
+	resourceMetrics, ok := v.(*metricdata.ResourceMetrics)
+	if !ok {
+		slog.Warn("failed to cast to metricdata.ResourceMetrics", slog.Any("value", v))
+		return nil
+	}
+	for _, scopeMetric := range resourceMetrics.ScopeMetrics {
+		for _, m := range scopeMetric.Metrics {
+			if _, ok := p.IncludeNames[m.Name]; !ok {
+				goto INCLUDE
+			}
+			if _, ok := p.ExcludeNames[m.Name]; ok {
+				continue
+			}
+		INCLUDE:
+			switch v := m.Data.(type) {
+			case metricdata.Gauge[int64]:
+				for _, dp := range p.filterInt64GaugeMetrics(v) {
+					slog.Info(m.Name, slog.Int64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", dp.Attributes))
+				}
+			case metricdata.Gauge[float64]:
+				for _, dp := range p.filterFloat64GaugeMetrics(v) {
+					slog.Info(m.Name, slog.Float64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", dp.Attributes))
+				}
+			case metricdata.Histogram[float64]:
+				for _, dp := range p.filterFloat64HistogramMetrics(v) {
+					slog.Info(m.Name, slog.Float64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", dp.Attributes))
+				}
+			}
+		}
+	}
+	return nil
+}
+
+type datapointToPrint[N int64 | float64] struct {
+	Value      N
+	Attributes map[string][]string
+}
+
+func (p FilterPrinter) filterInt64GaugeMetrics(gauge metricdata.Gauge[int64]) []datapointToPrint[int64] {
+	var dps []datapointToPrint[int64]
+	for _, dp := range gauge.DataPoints {
+		attrs := getAttrs(dp.Attributes)
+		for k, v := range p.IncludeAttributes {
+			if attrValues, ok := attrs[k]; ok {
+				for _, attrValue := range attrValues {
+					if attrValue == v {
+						goto INCLUDE
+					}
+				}
+			}
+		}
+		for k, v := range p.ExcludeAttributes {
+			if attrValues, ok := attrs[k]; ok {
+				for _, attrValue := range attrValues {
+					if attrValue == v {
+						goto EXCLUDE
+					}
+				}
+			}
+		}
+	INCLUDE:
+		dps = append(dps, datapointToPrint[int64]{
+			Value:      dp.Value,
+			Attributes: attrs,
+		})
+	EXCLUDE:
+		continue
+	}
+	return dps
+}
+
+func (p FilterPrinter) filterFloat64GaugeMetrics(gauge metricdata.Gauge[float64]) []datapointToPrint[float64] {
+	var dps []datapointToPrint[float64]
+	for _, dp := range gauge.DataPoints {
+		attrs := getAttrs(dp.Attributes)
+		for k, v := range p.IncludeAttributes {
+			if attrValues, ok := attrs[k]; ok {
+				for _, attrValue := range attrValues {
+					if attrValue == v {
+						goto INCLUDE
+					}
+				}
+			}
+		}
+		for k, v := range p.ExcludeAttributes {
+			if attrValues, ok := attrs[k]; ok {
+				for _, attrValue := range attrValues {
+					if attrValue == v {
+						goto EXCLUDE
+					}
+				}
+			}
+		}
+	INCLUDE:
+		dps = append(dps, datapointToPrint[float64]{
+			Value:      dp.Value,
+			Attributes: attrs,
+		})
+	EXCLUDE:
+		continue
+	}
+	return dps
+}
+
+func (p FilterPrinter) filterFloat64HistogramMetrics(histogram metricdata.Histogram[float64]) []datapointToPrint[float64] {
+	var dps []datapointToPrint[float64]
+	for _, dp := range histogram.DataPoints {
+		attrs := getAttrs(dp.Attributes)
+		for k, v := range p.IncludeAttributes {
+			if attrValues, ok := attrs[k]; ok {
+				for _, attrValue := range attrValues {
+					if attrValue == v {
+						dps = append(dps, datapointToPrint[float64]{
+							Value:      dp.Sum / float64(dp.Count),
+							Attributes: attrs,
+						})
+						goto INCLUDE
+					}
+				}
+			}
+		}
+		for k, v := range p.ExcludeAttributes {
+			if attrValues, ok := attrs[k]; ok {
+				for _, attrValue := range attrValues {
+					if attrValue == v {
+						goto EXCLUDE
+					}
+				}
+			}
+		}
+	INCLUDE:
+		dps = append(dps, datapointToPrint[float64]{
+			Value:      dp.Sum / float64(dp.Count),
+			Attributes: attrs,
+		})
+	EXCLUDE:
+		continue
+	}
+	return dps
+}
+
+func getAttrs(attrs attribute.Set) map[string][]string {
+	keysMap := make(map[string][]string)
+	itr := attrs.Iter()
+	for itr.Next() {
+		kv := itr.Attribute()
+		key := strings.Map(sanitizeRune, string(kv.Key))
+		if _, ok := keysMap[key]; !ok {
+			keysMap[key] = []string{kv.Value.Emit()}
+		} else {
+			// if the sanitized key is a duplicate, append to the list of keys
+			keysMap[key] = append(keysMap[key], kv.Value.Emit())
+		}
+	}
+	return keysMap
+}
+
+func sanitizeRune(r rune) rune {
+	if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ':' || r == '_' {
+		return r
+	}
+	return '_'
 }
