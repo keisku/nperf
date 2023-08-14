@@ -77,6 +77,10 @@ func (encoder) Encode(v any) error {
 				for _, dp := range v.DataPoints {
 					slog.Info(m.Name, slog.Float64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", getAttrs(dp.Attributes)))
 				}
+			case metricdata.Histogram[float64]:
+				for _, dp := range v.DataPoints {
+					slog.Info(m.Name, slog.Float64("value", dp.Sum/float64(dp.Count)), slog.String("unit", m.Unit), slog.Any("attributes", getAttrs(dp.Attributes)))
+				}
 			}
 		}
 	}

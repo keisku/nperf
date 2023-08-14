@@ -110,29 +110,6 @@ var (
 	tcpRetransmits             metric.Float64ObservableGauge = noop.Float64ObservableGauge{}
 )
 
-var int64CounterMetrics = map[Name]metric.Int64Counter{
-	DNSPollPacketEAGAIN:        dnsPollPacketEAGAIN,
-	DNSPollPacketTimeout:       dnsPollPacketTimeout,
-	DNSPollPacketError:         dnsPollPacketError,
-	DNSParseDNSLayerSkip:       dnsParseDNSLayerSkip,
-	DNSParseIPLayerError:       dnsParseIPLayerError,
-	DNSResponseFailure:         dnsResponseFailure,
-	DNSNoCorrespondingResponse: dnsNoCorrespondingResponse,
-	DNSDiscardQuestion:         dnsDiscardQuestion,
-	DNSExpiredCacheDelete:      dnsExpiredCacheDelete,
-}
-
-var float64ObservableGaugeMetrics = map[Name]metric.Float64ObservableGauge{
-	DNSQueryLatency: dnsQueryLatency,
-	TCPSentBytes:    tcpSentBytes,
-	TCPRecvBytes:    tcpRecvBytes,
-	TCPSentPackets:  tcpSentPackets,
-	TCPRecvPackets:  tcpRecvPackets,
-	TCPRtt:          tcpRtt,
-	TCPRttVar:       tcpRttVar,
-	TCPRetransmits:  tcpRetransmits,
-}
-
 type datapoint[N int64 | float64] struct {
 	Name       Name
 	Value      N
@@ -176,6 +153,15 @@ func ConfigureMetricMeter(m metric.Meter) (func(), error) {
 			return closeChs, err
 		}
 	}
+	for name := range float64HistogramMetrics {
+		if float64HistogramMetrics[name], err = m.Float64Histogram(
+			name.String(),
+			name.instrumentOptions()[0],
+			name.instrumentOptions()[1],
+		); err != nil {
+			return closeChs, err
+		}
+	}
 	for name := range float64ObservableGaugeMetrics {
 		// Using an anonymous function to capture the current value of `name`` in each iteration.
 		// Without this, all callbacks would reference the first value of 'name' from the loop.
@@ -211,6 +197,18 @@ func ConfigureMetricMeter(m metric.Meter) (func(), error) {
 	return closeChs, nil
 }
 
+var int64CounterMetrics = map[Name]metric.Int64Counter{
+	DNSPollPacketEAGAIN:        dnsPollPacketEAGAIN,
+	DNSPollPacketTimeout:       dnsPollPacketTimeout,
+	DNSPollPacketError:         dnsPollPacketError,
+	DNSParseDNSLayerSkip:       dnsParseDNSLayerSkip,
+	DNSParseIPLayerError:       dnsParseIPLayerError,
+	DNSResponseFailure:         dnsResponseFailure,
+	DNSNoCorrespondingResponse: dnsNoCorrespondingResponse,
+	DNSDiscardQuestion:         dnsDiscardQuestion,
+	DNSExpiredCacheDelete:      dnsExpiredCacheDelete,
+}
+
 func Inc(name Name, attrs ...attribute.KeyValue) {
 	switch name {
 	case Unknown:
@@ -222,6 +220,32 @@ func Inc(name Name, attrs ...attribute.KeyValue) {
 			slog.Warn("The datapoint is dropped because the name is not found")
 		}
 	}
+}
+
+var float64HistogramMetrics = map[Name]metric.Float64Histogram{}
+
+func Histgram(name Name, value float64, attrs ...attribute.KeyValue) {
+	switch name {
+	case Unknown:
+		slog.Warn("The datapoint is dropped because the name is unknown")
+	default:
+		if h, ok := float64HistogramMetrics[name]; ok {
+			h.Record(context.Background(), value, metric.WithAttributes(attrs...))
+		} else {
+			slog.Warn("The datapoint is dropped because the name is not found")
+		}
+	}
+}
+
+var float64ObservableGaugeMetrics = map[Name]metric.Float64ObservableGauge{
+	DNSQueryLatency: dnsQueryLatency,
+	TCPSentBytes:    tcpSentBytes,
+	TCPRecvBytes:    tcpRecvBytes,
+	TCPSentPackets:  tcpSentPackets,
+	TCPRecvPackets:  tcpRecvPackets,
+	TCPRetransmits:  tcpRetransmits,
+	TCPRtt:          tcpRtt,
+	TCPRttVar:       tcpRttVar,
 }
 
 func Gauge(name Name, value float64, attrs ...attribute.KeyValue) {
