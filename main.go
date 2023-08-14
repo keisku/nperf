@@ -65,7 +65,6 @@ func initMeterProvider(encoder stdoutmetric.Encoder) (func(context.Context) erro
 	}
 	meterProvider := metric.NewMeterProvider(
 		metric.WithReader(reader),
-		// Every 100ms, write metrics to io.Writer of slog.
 		metric.WithReader(metric.NewPeriodicReader(stdoutExporter, metric.WithInterval(nperfmetric.PollInerval))),
 	)
 	otel.SetMeterProvider(meterProvider)
