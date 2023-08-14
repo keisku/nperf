@@ -222,7 +222,8 @@ func (m *Monitor) storeAnswers(ctx context.Context, payload Payload) {
 func (m *Monitor) deleteAnswer(addr netip.Addr, name string) {
 	m.answers.Delete(addr)
 	for {
-		slog.Debug("delete an expired resolved cname cache")
+		slog.Debug("delete an expired dns cache")
+		metric.Inc(metric.DNSExpiredCacheDelete, attribute.String("name", name), attribute.String("ip_addr", addr.String()))
 		resolvedCname, ok := m.reverseCnames.LoadAndDelete(name)
 		if !ok {
 			break
@@ -242,7 +243,6 @@ func (m *Monitor) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, map
 		}
 		answer := v.(answer)
 		if answer.ExpiredAt.Before(getNow()) {
-			slog.Debug("delete an expired resolved answer cache")
 			m.deleteAnswer(addr, answer.Name)
 			continue
 		}
@@ -275,7 +275,6 @@ func (m *Monitor) DumpAnswers(w io.Writer) error {
 		ipAddr := k.(netip.Addr)
 		answer := v.(answer)
 		if answer.ExpiredAt.Before(getNow()) {
-			slog.Debug("delete an expired resolved answer cache")
 			m.deleteAnswer(ipAddr, answer.Name)
 			return true
 		}
