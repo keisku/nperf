@@ -15,6 +15,7 @@ import (
 	"github.com/keisku/nperf/dns"
 	nperfebpf "github.com/keisku/nperf/ebpf"
 	nperfmetric "github.com/keisku/nperf/metric"
+	"github.com/keisku/nperf/process"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
@@ -137,6 +138,10 @@ func (o *Options) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to configure metric meter: %s", err)
 	}
 
+	// Process
+	var procMonitor process.Monitor
+	go procMonitor.Run(ctx)
+
 	// DNS
 	dnsMonitor := &dns.Monitor{}
 	if !o.DisableDNS {
@@ -150,7 +155,7 @@ func (o *Options) Run(ctx context.Context) error {
 	// eBPF
 	stopebpf := func() {}
 	if !o.DisableeBPF {
-		stopebpf, err = nperfebpf.Start(ctx, dnsMonitor)
+		stopebpf, err = nperfebpf.Start(ctx, dnsMonitor, &procMonitor)
 		if err != nil {
 			return fmt.Errorf("failed to start ebpf programs: %s", err)
 		}

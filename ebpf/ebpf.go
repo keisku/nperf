@@ -20,19 +20,30 @@ type DNS interface {
 	ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, map[string]string, error)
 }
 
-type noopDNS struct{}
+type ProcessNameResolver interface {
+	NameById(pid int32) (name string, isZombie bool, err error)
+}
 
-func (noopDNS) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, map[string]string, error) {
+type noop struct{}
+
+func (noop) ReverseResolve(addrs []netip.Addr) (map[netip.Addr]string, map[string]string, error) {
 	return nil, nil, nil
+}
+
+func (noop) NameById(pid int32) (name string, isZombie bool, err error) {
+	return "", false, nil
 }
 
 var objs bpfObjects
 
 // Start starts the eBPF program by loading the BPF objects and attaching tracing to the specified programs.
 // It returns an error if it fails to load the BPF objects or attach tracing.
-func Start(inCtx context.Context, dns DNS) (context.CancelFunc, error) {
+func Start(inCtx context.Context, dns DNS, procNameResolver ProcessNameResolver) (context.CancelFunc, error) {
 	if dns == nil {
-		dns = noopDNS{}
+		dns = noop{}
+	}
+	if procNameResolver == nil {
+		procNameResolver = noop{}
 	}
 	ctx, cancel := context.WithCancel(inCtx)
 	err := loadBpfObjects(&objs, nil)
@@ -113,6 +124,15 @@ func Start(inCtx context.Context, dns DNS) (context.CancelFunc, error) {
 						attrs = append(attrs, resolveDomainAndCnamesToAttributes("daddr", daddr, domains, cnames)...)
 					} else {
 						slog.Debug(err.Error(), slog.String("saddr", saddr.String()), slog.String("daddr", daddr.String()))
+					}
+					procName, isZombie, err := procNameResolver.NameById(int32(connTuple.Pid))
+					if err == nil {
+						attrs = append(attrs, attribute.KeyValue{Key: "prococess_name", Value: attribute.StringValue(procName)})
+						if isZombie {
+							attrs = append(attrs, attribute.KeyValue{Key: "is_zombie", Value: attribute.BoolValue(isZombie)})
+						}
+					} else {
+						slog.Debug(err.Error(), slog.Int("pid", int(connTuple.Pid)))
 					}
 					metric.Gauge(metric.TCPSentBytes, float64(connStats.SentBytes)/1000, attrs...)
 					metric.Gauge(metric.TCPRecvBytes, float64(connStats.RecvBytes)/1000, attrs...)
