@@ -127,7 +127,7 @@ func Start(inCtx context.Context, dns DNS, procNameResolver ProcessNameResolver)
 					}
 					procName, isZombie, err := procNameResolver.NameById(int32(connTuple.Pid))
 					if err == nil {
-						attrs = append(attrs, attribute.KeyValue{Key: "prococess_name", Value: attribute.StringValue(procName)})
+						attrs = append(attrs, attribute.KeyValue{Key: "process_name", Value: attribute.StringValue(procName)})
 						if isZombie {
 							attrs = append(attrs, attribute.KeyValue{Key: "is_zombie", Value: attribute.BoolValue(isZombie)})
 						}
