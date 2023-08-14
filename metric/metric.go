@@ -2,7 +2,9 @@ package metric
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -270,13 +272,60 @@ func Gauge(name Name, value float64, attrs ...attribute.KeyValue) {
 }
 
 // FilterPrinter is a printer that filters the output.
-// TODO: Support regex.
-// TODO: Create unit tests.
 type FilterPrinter struct {
-	IncludeNames      map[string]struct{}
-	ExcludeNames      map[string]struct{}
-	IncludeAttributes map[string]string
-	ExcludeAttributes map[string]string
+	includeNames      []*regexp.Regexp
+	excludeNames      []*regexp.Regexp
+	includeAttributes map[string]*regexp.Regexp
+	excludeAttributes map[string]*regexp.Regexp
+}
+
+func NewFilterPrinter(includeNames, excludeNames, includeAttributes, excludeAttributes []string) (FilterPrinter, error) {
+	inNs := make([]*regexp.Regexp, len(includeNames))
+	for i, name := range includeNames {
+		r, err := regexp.Compile(name)
+		if err != nil {
+			return FilterPrinter{}, err
+		}
+		inNs[i] = r
+	}
+	exNs := make([]*regexp.Regexp, len(excludeNames))
+	for i, name := range excludeNames {
+		r, err := regexp.Compile(name)
+		if err != nil {
+			return FilterPrinter{}, err
+		}
+		exNs[i] = r
+	}
+	inAttrs := make(map[string]*regexp.Regexp, len(includeAttributes))
+	for _, v := range includeAttributes {
+		kv := strings.SplitN(v, ":", 2)
+		if len(kv) != 2 {
+			return FilterPrinter{}, fmt.Errorf("invalid input: %s", v)
+		}
+		r, err := regexp.Compile(kv[1])
+		if err != nil {
+			return FilterPrinter{}, err
+		}
+		inAttrs[kv[0]] = r
+	}
+	exAttrs := make(map[string]*regexp.Regexp, len(excludeAttributes))
+	for _, v := range excludeAttributes {
+		kv := strings.SplitN(v, ":", 2)
+		if len(kv) != 2 {
+			return FilterPrinter{}, fmt.Errorf("invalid input: %s", v)
+		}
+		r, err := regexp.Compile(kv[1])
+		if err != nil {
+			return FilterPrinter{}, err
+		}
+		exAttrs[kv[0]] = r
+	}
+	return FilterPrinter{
+		includeNames:      inNs,
+		excludeNames:      exNs,
+		includeAttributes: inAttrs,
+		excludeAttributes: exAttrs,
+	}, nil
 }
 
 var _ stdoutmetric.Encoder = FilterPrinter{}
@@ -289,154 +338,91 @@ func (p FilterPrinter) Encode(v any) error {
 	}
 	for _, scopeMetric := range resourceMetrics.ScopeMetrics {
 		for _, m := range scopeMetric.Metrics {
-			if _, ok := p.IncludeNames[m.Name]; !ok {
-				goto INCLUDE
+			for _, r := range p.includeNames {
+				if r.MatchString(m.Name) {
+					goto INCLUDE
+				}
 			}
-			if _, ok := p.ExcludeNames[m.Name]; ok {
-				continue
+			for _, r := range p.excludeNames {
+				if r.MatchString(m.Name) {
+					goto EXCLUDE
+				}
 			}
 		INCLUDE:
 			switch v := m.Data.(type) {
 			case metricdata.Gauge[int64]:
-				for _, dp := range p.filterInt64GaugeMetrics(v) {
-					slog.Info(m.Name, slog.Int64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", dp.Attributes))
+				for _, dp := range filter[int64](p, v) {
+					slog.LogAttrs(context.Background(), slog.LevelInfo, m.Name, append([]slog.Attr{slog.Int64("value", dp.Value), slog.String("unit", m.Unit)}, dp.Attrs...)...)
 				}
 			case metricdata.Gauge[float64]:
-				for _, dp := range p.filterFloat64GaugeMetrics(v) {
-					slog.Info(m.Name, slog.Float64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", dp.Attributes))
+				for _, dp := range filter[float64](p, v) {
+					slog.LogAttrs(context.Background(), slog.LevelInfo, m.Name, append([]slog.Attr{slog.Float64("value", dp.Value), slog.String("unit", m.Unit)}, dp.Attrs...)...)
 				}
 			case metricdata.Histogram[float64]:
-				for _, dp := range p.filterFloat64HistogramMetrics(v) {
-					slog.Info(m.Name, slog.Float64("value", dp.Value), slog.String("unit", m.Unit), slog.Any("attributes", dp.Attributes))
+				for _, dp := range filter[float64](p, v) {
+					slog.LogAttrs(context.Background(), slog.LevelInfo, m.Name, append([]slog.Attr{slog.Float64("value", dp.Value), slog.String("unit", m.Unit)}, dp.Attrs...)...)
 				}
 			}
+		EXCLUDE:
 		}
 	}
 	return nil
 }
 
 type datapointToPrint[N int64 | float64] struct {
-	Value      N
-	Attributes map[string][]string
+	Value N
+	Attrs []slog.Attr
 }
 
-func (p FilterPrinter) filterInt64GaugeMetrics(gauge metricdata.Gauge[int64]) []datapointToPrint[int64] {
-	var dps []datapointToPrint[int64]
-	for _, dp := range gauge.DataPoints {
-		attrs := getAttrs(dp.Attributes)
-		for k, v := range p.IncludeAttributes {
-			if attrValues, ok := attrs[k]; ok {
-				for _, attrValue := range attrValues {
-					if attrValue == v {
-						goto INCLUDE
-					}
-				}
+func filter[N int64 | float64](fp FilterPrinter, agg metricdata.Aggregation) []datapointToPrint[N] {
+	var dps []datapointToPrint[N]
+	switch v := agg.(type) {
+	case metricdata.Gauge[N]:
+		for _, dp := range v.DataPoints {
+			attrs := slogAttrs(dp.Attributes)
+			if fp.shouldInclude(attrs) {
+				dps = append(dps, datapointToPrint[N]{Value: dp.Value, Attrs: attrs})
 			}
 		}
-		for k, v := range p.ExcludeAttributes {
-			if attrValues, ok := attrs[k]; ok {
-				for _, attrValue := range attrValues {
-					if attrValue == v {
-						goto EXCLUDE
-					}
-				}
+	case metricdata.Histogram[N]:
+		for _, dp := range v.DataPoints {
+			attrs := slogAttrs(dp.Attributes)
+			if fp.shouldInclude(attrs) {
+				dps = append(dps, datapointToPrint[N]{Value: dp.Sum / N(dp.Count), Attrs: attrs})
 			}
 		}
-	INCLUDE:
-		dps = append(dps, datapointToPrint[int64]{
-			Value:      dp.Value,
-			Attributes: attrs,
-		})
-	EXCLUDE:
-		continue
 	}
 	return dps
 }
 
-func (p FilterPrinter) filterFloat64GaugeMetrics(gauge metricdata.Gauge[float64]) []datapointToPrint[float64] {
-	var dps []datapointToPrint[float64]
-	for _, dp := range gauge.DataPoints {
-		attrs := getAttrs(dp.Attributes)
-		for k, v := range p.IncludeAttributes {
-			if attrValues, ok := attrs[k]; ok {
-				for _, attrValue := range attrValues {
-					if attrValue == v {
-						goto INCLUDE
-					}
+func (p FilterPrinter) shouldInclude(attrs []slog.Attr) bool {
+	if 0 < len(p.includeAttributes) || 0 < len(p.excludeAttributes) {
+		for _, attr := range attrs {
+			if r, ok := p.includeAttributes[attr.Key]; ok {
+				if r.MatchString(attr.Value.String()) {
+					return true
+				}
+			}
+			if r, ok := p.excludeAttributes[attr.Key]; ok {
+				if r.MatchString(attr.Value.String()) {
+					return false
 				}
 			}
 		}
-		for k, v := range p.ExcludeAttributes {
-			if attrValues, ok := attrs[k]; ok {
-				for _, attrValue := range attrValues {
-					if attrValue == v {
-						goto EXCLUDE
-					}
-				}
-			}
-		}
-	INCLUDE:
-		dps = append(dps, datapointToPrint[float64]{
-			Value:      dp.Value,
-			Attributes: attrs,
-		})
-	EXCLUDE:
-		continue
 	}
-	return dps
+	return true
 }
 
-func (p FilterPrinter) filterFloat64HistogramMetrics(histogram metricdata.Histogram[float64]) []datapointToPrint[float64] {
-	var dps []datapointToPrint[float64]
-	for _, dp := range histogram.DataPoints {
-		attrs := getAttrs(dp.Attributes)
-		for k, v := range p.IncludeAttributes {
-			if attrValues, ok := attrs[k]; ok {
-				for _, attrValue := range attrValues {
-					if attrValue == v {
-						dps = append(dps, datapointToPrint[float64]{
-							Value:      dp.Sum / float64(dp.Count),
-							Attributes: attrs,
-						})
-						goto INCLUDE
-					}
-				}
-			}
-		}
-		for k, v := range p.ExcludeAttributes {
-			if attrValues, ok := attrs[k]; ok {
-				for _, attrValue := range attrValues {
-					if attrValue == v {
-						goto EXCLUDE
-					}
-				}
-			}
-		}
-	INCLUDE:
-		dps = append(dps, datapointToPrint[float64]{
-			Value:      dp.Sum / float64(dp.Count),
-			Attributes: attrs,
-		})
-	EXCLUDE:
-		continue
-	}
-	return dps
-}
-
-func getAttrs(attrs attribute.Set) map[string][]string {
-	keysMap := make(map[string][]string)
+func slogAttrs(attrs attribute.Set) []slog.Attr {
+	var slogAttrs []slog.Attr
 	itr := attrs.Iter()
 	for itr.Next() {
 		kv := itr.Attribute()
 		key := strings.Map(sanitizeRune, string(kv.Key))
-		if _, ok := keysMap[key]; !ok {
-			keysMap[key] = []string{kv.Value.Emit()}
-		} else {
-			// if the sanitized key is a duplicate, append to the list of keys
-			keysMap[key] = append(keysMap[key], kv.Value.Emit())
-		}
+		// If a key is duplicated, the last one wins.
+		slogAttrs = append(slogAttrs, slog.String(key, kv.Value.Emit()))
 	}
-	return keysMap
+	return slogAttrs
 }
 
 func sanitizeRune(r rune) rune {

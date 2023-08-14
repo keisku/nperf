@@ -34,11 +34,6 @@ type Options struct {
 	ExcludeNames      []string
 	IncludeAttributes []string
 	ExcludeAttributes []string
-
-	includeNames      map[string]struct{}
-	excludeNames      map[string]struct{}
-	includeAttributes map[string]string
-	excludeAttributes map[string]string
 }
 
 func (o *Options) Validate() error {
@@ -56,28 +51,6 @@ func (o *Options) Validate() error {
 		logHandler = slog.NewTextHandler(logWriter, nil)
 	}
 	slog.SetDefault(slog.New(logHandler))
-	for _, name := range o.IncludeNames {
-		o.includeNames[name] = struct{}{}
-	}
-	for _, name := range o.ExcludeNames {
-		o.excludeNames[name] = struct{}{}
-	}
-	for _, attr := range o.IncludeAttributes {
-		kv := strings.Split(attr, ":")
-		if len(kv) != 2 {
-			slog.Warn("invalid input", slog.String("attribute", attr))
-			continue
-		}
-		o.includeAttributes[kv[0]] = kv[1]
-	}
-	for _, attr := range o.ExcludeAttributes {
-		kv := strings.Split(attr, ":")
-		if len(kv) != 2 {
-			slog.Warn("invalid input", slog.String("attribute", attr))
-			continue
-		}
-		o.excludeAttributes[kv[0]] = kv[1]
-	}
 	return nil
 }
 
@@ -100,12 +73,11 @@ func initMeterProvider(encoder stdoutmetric.Encoder) (func(context.Context) erro
 }
 
 func (o *Options) Run(ctx context.Context) error {
-	shutdownMeterProvider, err := initMeterProvider(nperfmetric.FilterPrinter{
-		IncludeNames:      o.includeNames,
-		ExcludeNames:      o.excludeNames,
-		IncludeAttributes: o.includeAttributes,
-		ExcludeAttributes: o.excludeAttributes,
-	})
+	fp, err := nperfmetric.NewFilterPrinter(o.IncludeNames, o.ExcludeNames, o.IncludeAttributes, o.ExcludeAttributes)
+	if err != nil {
+		return err
+	}
+	shutdownMeterProvider, err := initMeterProvider(fp)
 	if err != nil {
 		return fmt.Errorf("failed to create meter provider: %s", err)
 	}
@@ -181,10 +153,6 @@ func NewCmd() *cobra.Command {
 		ExcludeNames:      []string{},
 		IncludeAttributes: []string{},
 		ExcludeAttributes: []string{},
-		includeNames:      make(map[string]struct{}),
-		excludeNames:      make(map[string]struct{}),
-		includeAttributes: make(map[string]string),
-		excludeAttributes: make(map[string]string),
 	}
 	cmd := &cobra.Command{
 		Use:          "ntop",
@@ -195,10 +163,10 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.Port, "port", "p", o.Port, "port to listen on")
 	cmd.Flags().BoolVar(&o.DisableDNS, "disable-dns", o.DisableDNS, "disable DNS monitoring")
 	cmd.Flags().BoolVar(&o.DisableeBPF, "disable-ebpf", o.DisableeBPF, "disable ebpf monitoring")
-	cmd.Flags().StringArrayVar(&o.IncludeNames, "include", o.IncludeNames, `include these names in the output. include is prioritized over exclude. e.g., "nperf_tcp_rtt"`)
-	cmd.Flags().StringArrayVar(&o.ExcludeNames, "exclude", o.ExcludeNames, `exclude these names in the output, e.g., "nperf_tcp_rtt"`)
-	cmd.Flags().StringArrayVar(&o.IncludeAttributes, "include-attribute", o.IncludeAttributes, "include these attributes in the output. include is prioritized over exclude. e.g., key:value")
-	cmd.Flags().StringArrayVar(&o.ExcludeAttributes, "exclude-attribute", o.ExcludeAttributes, "exclude these attributes in the output, e.g, key:value")
+	cmd.Flags().StringArrayVar(&o.IncludeNames, "include", o.IncludeNames, `include these names in the output. inclusion is prioritized over exclusion. e.g., '^nperf_tcp_rtt$', '.*count$'`)
+	cmd.Flags().StringArrayVar(&o.ExcludeNames, "exclude", o.ExcludeNames, `exclude these names in the output, e.g., '.*', 'nperf_tcp_.*'`)
+	cmd.Flags().StringArrayVar(&o.IncludeAttributes, "include-attribute", o.IncludeAttributes, `include these attributes in the output. inclusion is prioritized over exclusion. e.g., 'pid:1234', 'domain:.*\.com$'`)
+	cmd.Flags().StringArrayVar(&o.ExcludeAttributes, "exclude-attribute", o.ExcludeAttributes, `exclude these attributes in the output, e.g., 'process_name:.*', 'key:mustnot:have'`)
 	cmd.RunE = func(c *cobra.Command, _ []string) error {
 		if err := o.Validate(); err != nil {
 			return err
