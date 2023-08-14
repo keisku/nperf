@@ -1,6 +1,6 @@
 module github.com/keisku/nperf
 
-go 1.20
+go 1.21
 
 require (
 	github.com/cilium/ebpf v0.11.0
@@ -14,7 +14,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.16.0
 	go.opentelemetry.io/otel/sdk v1.16.0
 	go.opentelemetry.io/otel/sdk/metric v0.39.0
-	golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b
+	golang.org/x/exp v0.0.0-20230811145659-89c5cff77bcb
 )
 
 require (
@@ -25,9 +25,9 @@ require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
+	github.com/lufia/plan9stats v0.0.0-20230326075908-cb1d2100619a // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
+	github.com/power-devops/perfstat v0.0.0-20221212215047-62379fc7944b // indirect
 	github.com/prometheus/client_model v0.4.0 // indirect
 	github.com/prometheus/common v0.44.0 // indirect
 	github.com/prometheus/procfs v0.11.1 // indirect
