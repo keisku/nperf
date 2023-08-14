@@ -28,12 +28,12 @@ import (
 	"golang.org/x/exp/slog"
 )
 
-const version = "0.0.1"
-
 type Options struct {
 	Output       string
 	OutputFormat string
 	Port         int
+	DisableDNS   bool
+	DisableeBPF  bool
 }
 
 func (o *Options) Validate() error {
@@ -138,16 +138,22 @@ func (o *Options) Run(ctx context.Context) error {
 	}
 
 	// DNS
-	dnsMonitor, err := dns.NewMonitor()
-	if err != nil {
-		return fmt.Errorf("failed to create DNS Monitor: %s", err)
+	dnsMonitor := &dns.Monitor{}
+	if !o.DisableDNS {
+		dnsMonitor, err = dns.NewMonitor()
+		if err != nil {
+			return fmt.Errorf("failed to create DNS Monitor: %s", err)
+		}
+		go dnsMonitor.Run(ctx)
 	}
-	go dnsMonitor.Run(ctx)
 
 	// eBPF
-	stopebpf, err := nperfebpf.Start(ctx, dnsMonitor)
-	if err != nil {
-		return fmt.Errorf("failed to start ebpf programs: %s", err)
+	stopebpf := func() {}
+	if !o.DisableeBPF {
+		stopebpf, err = nperfebpf.Start(ctx, dnsMonitor)
+		if err != nil {
+			return fmt.Errorf("failed to start ebpf programs: %s", err)
+		}
 	}
 
 	// HTTP server
@@ -188,6 +194,8 @@ func NewCmd() *cobra.Command {
 		Output:       "",
 		OutputFormat: "json",
 		Port:         7000,
+		DisableDNS:   false,
+		DisableeBPF:  false,
 	}
 	cmd := &cobra.Command{
 		Use:          "ntop",
@@ -196,6 +204,8 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&o.Output, "output", "o", o.Output, "write output to this file instead of stdout")
 	cmd.Flags().StringVar(&o.OutputFormat, "output-format", o.OutputFormat, "write output in this format")
 	cmd.Flags().IntVarP(&o.Port, "port", "p", o.Port, "port to listen on")
+	cmd.Flags().BoolVar(&o.DisableDNS, "disable-dns", o.DisableDNS, "disable DNS monitoring")
+	cmd.Flags().BoolVar(&o.DisableeBPF, "disable-ebpf", o.DisableeBPF, "disable ebpf monitoring")
 	cmd.RunE = func(c *cobra.Command, _ []string) error {
 		if err := o.Validate(); err != nil {
 			return err
