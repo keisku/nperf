@@ -105,16 +105,16 @@ func (p *parser) parse(data []byte, payload *Payload) error {
 			}
 		case layers.LayerTypeUDP:
 			if payload.QR {
-				payload.connection.clientPort = uint16(p.udpPayload.DstPort)
+				payload.connection.sport = uint16(p.udpPayload.DstPort)
 			} else {
-				payload.connection.clientPort = uint16(p.udpPayload.SrcPort)
+				payload.connection.sport = uint16(p.udpPayload.SrcPort)
 			}
 			payload.connection.protocol = syscall.IPPROTO_UDP
 		case layers.LayerTypeTCP:
 			if payload.QR {
-				payload.connection.clientPort = uint16(p.tcpPayload.DstPort)
+				payload.connection.sport = uint16(p.tcpPayload.DstPort)
 			} else {
-				payload.connection.clientPort = uint16(p.tcpPayload.SrcPort)
+				payload.connection.sport = uint16(p.tcpPayload.SrcPort)
 			}
 			payload.connection.protocol = syscall.IPPROTO_TCP
 		}
@@ -143,11 +143,11 @@ func (*parser) parseIpAddr(payload *Payload, layer gopacket.DecodingLayer) error
 		return fmt.Errorf("parse destination IP address: %s", rawDstIp)
 	}
 	if payload.QR {
-		payload.connection.clientIP = dstIp
-		payload.connection.serverIP = srcIp
+		payload.connection.saddr = dstIp
+		payload.connection.daddr = srcIp
 	} else {
-		payload.connection.clientIP = srcIp
-		payload.connection.serverIP = dstIp
+		payload.connection.saddr = srcIp
+		payload.connection.daddr = dstIp
 	}
 	return nil
 }

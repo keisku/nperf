@@ -23,18 +23,18 @@ func (p *Payload) Attributes() []attribute.KeyValue {
 
 // An identifier for a set of DNS connections
 type Connection struct {
-	serverIP   netip.Addr
-	clientIP   netip.Addr
-	clientPort uint16
+	daddr netip.Addr
+	saddr netip.Addr
+	sport uint16
 	// Protocol will be either TCP or UDP
 	protocol uint8
 }
 
 func (c Connection) Attributes() []attribute.KeyValue {
 	return []attribute.KeyValue{
-		attribute.String("server_ip", c.serverIP.String()),
-		attribute.String("client_ip", c.clientIP.String()),
-		attribute.Int("client_port", int(c.clientPort)),
+		attribute.String("daddr", c.daddr.String()),
+		attribute.String("saddr", c.saddr.String()),
+		attribute.Int("sport", int(c.sport)),
 		attribute.Int("protocol", int(c.protocol)),
 	}
 }
