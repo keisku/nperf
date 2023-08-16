@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/gopacket/layers"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMonitor_ReverseResolve(t *testing.T) {
@@ -124,62 +125,41 @@ func TestMonitor_ReverseResolve(t *testing.T) {
 				m.storeAnswers(context.Background(), payload)
 			}
 			names, cnames, err := m.ReverseResolve(tt.addrs)
-			if err == nil {
-				if tt.wantErr != "" {
-					t.Errorf("ReverseResolve() error = %v, wantErr %v", err, tt.wantErr)
-					return
-				}
+			if tt.wantErr == "" {
+				assert.Nil(t, err)
 			} else {
-				if tt.wantErr != err.Error() {
-					t.Errorf("ReverseResolve() error = %v, wantErr %v", err, tt.wantErr)
-					return
-				}
+				assert.EqualError(t, err, tt.wantErr)
 			}
-			if !reflect.DeepEqual(names, tt.reverseNames) {
-				t.Errorf("ReverseResolve() = %v, want %v", names, tt.reverseNames)
-				return
-			}
-			if !reflect.DeepEqual(cnames, tt.reverseCnames) {
-				t.Errorf("ReverseResolve() = %v, want %v", cnames, tt.reverseCnames)
-				return
-			}
+			assert.Equal(t, names, tt.reverseNames)
+			assert.Equal(t, cnames, tt.reverseCnames)
 			if tt.wantErrAfterExpired != "" {
 				<-time.After(answerTTL)
 			}
 			names, cnames, err = m.ReverseResolve(tt.addrs)
 			if tt.wantErrAfterExpired == "" {
-				if !reflect.DeepEqual(names, tt.reverseNames) {
-					t.Errorf("ReverseResolve() = %v, want %v", names, tt.reverseNames)
-				}
-				if !reflect.DeepEqual(cnames, tt.reverseCnames) {
-					t.Errorf("ReverseResolve() = %v, want %v", cnames, tt.reverseCnames)
-				}
+				assert.Nil(t, err)
+				assert.Equal(t, names, tt.reverseNames)
+				assert.Equal(t, cnames, tt.reverseCnames)
 				return
-			} else {
-				if err == nil {
-					t.Errorf("ReverseResolve() error = %v, wantErr %v", err, tt.wantErrAfterExpired)
-					return
-				}
-				if tt.wantErrAfterExpired != err.Error() {
-					t.Errorf("ReverseResolve() error = %v, wantErr %v", err, tt.wantErrAfterExpired)
-					return
-				}
-				count := 0
-				m.answers.Range(func(key, value interface{}) bool {
-					count++
-					return true
-				})
-				if 0 < count {
-					t.Error("ReverseResolve() answers are not cleared after ttl expired")
-					count = 0
-				}
-				m.reverseCnames.Range(func(key, value interface{}) bool {
-					count++
-					return true
-				})
-				if 0 < count {
-					t.Error("ReverseResolve() cname answers are not cleared after ttl expired")
-				}
+			}
+			assert.EqualError(t, err, tt.wantErrAfterExpired)
+			assert.Len(t, names, 0)
+			assert.Len(t, cnames, 0)
+			count := 0
+			m.answers.Range(func(key, value interface{}) bool {
+				count++
+				return true
+			})
+			if 0 < count {
+				t.Error("ReverseResolve() answers are not cleared after ttl expired")
+				count = 0
+			}
+			m.reverseCnames.Range(func(key, value interface{}) bool {
+				count++
+				return true
+			})
+			if 0 < count {
+				t.Error("ReverseResolve() cname answers are not cleared after ttl expired")
 			}
 		})
 	}
@@ -349,9 +329,9 @@ func TestMonitor_DumpAnswers(t *testing.T) {
 				<-time.After(answerTTL)
 			}
 			var w bytes.Buffer
-			m.DumpAnswers(&w)
+			assert.Nil(t, m.DumpAnswers(&w))
 			var gotAnswers []answerToDump
-			json.NewDecoder(&w).Decode(&gotAnswers)
+			assert.Nil(t, json.NewDecoder(&w).Decode(&gotAnswers))
 			if len(tt.wantAnswers) == 0 && 0 < len(gotAnswers) {
 				t.Error("DumpAnswers() = empty, want empty")
 				return
