@@ -354,11 +354,7 @@ func (p FilterPrinter) Encode(v any) error {
 				for _, dp := range filter[int64](p, v) {
 					slog.LogAttrs(context.Background(), slog.LevelInfo, m.Name, append([]slog.Attr{slog.Int64("value", dp.Value), slog.String("unit", m.Unit)}, dp.Attrs...)...)
 				}
-			case metricdata.Gauge[float64]:
-				for _, dp := range filter[float64](p, v) {
-					slog.LogAttrs(context.Background(), slog.LevelInfo, m.Name, append([]slog.Attr{slog.Float64("value", dp.Value), slog.String("unit", m.Unit)}, dp.Attrs...)...)
-				}
-			case metricdata.Histogram[float64]:
+			case metricdata.Gauge[float64], metricdata.Histogram[float64]:
 				for _, dp := range filter[float64](p, v) {
 					slog.LogAttrs(context.Background(), slog.LevelInfo, m.Name, append([]slog.Attr{slog.Float64("value", dp.Value), slog.String("unit", m.Unit)}, dp.Attrs...)...)
 				}
