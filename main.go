@@ -25,6 +25,7 @@ import (
 )
 
 type Options struct {
+	LogLevel          string
 	Output            string
 	OutputFormat      string
 	Port              int
@@ -37,6 +38,20 @@ type Options struct {
 }
 
 func (o *Options) Validate() error {
+	var logLevel = new(slog.LevelVar)
+	logHandlerOpts := &slog.HandlerOptions{Level: logLevel}
+	switch strings.ToUpper(o.LogLevel) {
+	case slog.LevelDebug.String():
+		logLevel.Set(slog.LevelDebug)
+	case slog.LevelInfo.String():
+		logLevel.Set(slog.LevelInfo)
+	case slog.LevelWarn.String():
+		logLevel.Set(slog.LevelWarn)
+	case slog.LevelError.String():
+		logLevel.Set(slog.LevelError)
+	default:
+		logLevel.Set(slog.LevelInfo)
+	}
 	logWriter := os.Stdout
 	if o.Output != "" {
 		f, err := os.Create(o.Output)
@@ -46,9 +61,9 @@ func (o *Options) Validate() error {
 		logWriter = f
 	}
 	var logHandler slog.Handler
-	logHandler = slog.NewJSONHandler(logWriter, nil)
+	logHandler = slog.NewJSONHandler(logWriter, logHandlerOpts)
 	if strings.ToLower(o.OutputFormat) == "text" {
-		logHandler = slog.NewTextHandler(logWriter, nil)
+		logHandler = slog.NewTextHandler(logWriter, logHandlerOpts)
 	}
 	slog.SetDefault(slog.New(logHandler))
 	return nil
@@ -143,6 +158,7 @@ func (o *Options) Run(ctx context.Context) error {
 
 func NewCmd() *cobra.Command {
 	o := &Options{
+		LogLevel:          slog.LevelInfo.String(),
 		Output:            "",
 		OutputFormat:      "json",
 		Port:              7000,
@@ -157,6 +173,7 @@ func NewCmd() *cobra.Command {
 		Use:          "ntop",
 		SilenceUsage: true,
 	}
+	cmd.Flags().StringVarP(&o.LogLevel, "loglevel", "l", o.LogLevel, "log level")
 	cmd.Flags().StringVarP(&o.Output, "output", "o", o.Output, "write output to this file instead of stdout")
 	cmd.Flags().StringVar(&o.OutputFormat, "output-format", o.OutputFormat, "write output in this format")
 	cmd.Flags().IntVarP(&o.Port, "port", "p", o.Port, "port to listen on")
