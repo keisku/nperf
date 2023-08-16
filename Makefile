@@ -17,3 +17,7 @@ generate:
 
 format:
 	find . -type f \( -name '*.[ch]' -and -not -name 'vmlinux.h' \) -exec clang-format -i {} \;
+
+test:
+	go vet ./...
+	go test -race -v ./...
